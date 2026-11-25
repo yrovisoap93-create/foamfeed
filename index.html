@@ -83,7 +83,7 @@ body.nonotes aside small{display:none}
 <details><summary>How vibration is modelled</summary><small>The whole cartridge (hopper, plate, belts) is shaken rigidly and sinusoidally; in the cartridge's frame that is an oscillating extra gravity on every pill, so lift-off, bouncing and walking along the walls all come out of the normal contact physics. Strength is peak acceleration; above ~1 g pills briefly leave the surfaces each cycle. A 23 mm speaker at 40 Hz is far below its resonance and moves very little air — the real transmitted acceleration depends on how it is coupled to the frame, so measure it (phone accelerometer app on the cartridge) and set Strength to match.</small></details>
 <h2>Sensors &amp; feed control</h2>
 <div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="continuous">Continuous (belts always run)</option><option value="feed">Feed on demand (sensor stops it)</option></select></div>
-<div class="btns"><button id="btnFeed" title="run the conveyor (and vibrator) until the stop sensor sees a pill">▶ Feed pill</button><button id="btnFeedN" title="queue this many feeds back to back, with the gap time between them">Feed ×</button><input type="number" id="ctN" min="1" max="1000" value="10" style="width:52px"><button id="btnFeedStop">■ Stop</button></div>
+<div class="btns"><button id="btnFeed" title="run the conveyor (and vibrator) until the stop sensor sees a pill">▶ Feed pill</button><button id="btnFeedN" title="run the conveyor until the stop sensor has counted this many pills, then stop">Feed ×</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:52px"><button id="btnFeedStop">■ Stop</button></div>
 <div class="kv"><b>Controller</b><span id="r_ct"></span><b>Sensors</b><span id="r_sens"></span><b>Last feed</b><span id="r_feed"></span><b>Feeds</b><span id="r_feeds"></span><b>Time to pill</b><span id="r_ttp"></span></div>
 <div class="row"><label for="ctBack" title="after the stop sensor counts a pill (and the stop delay), run the belts backwards a short distance to pull the next pill back from the nip">Backup after count</label><input type="checkbox" id="ctBack" style="justify-self:start"></div>
 <div class="row"><label for="ctBackMm" title="belt surface travel in reverse">Backup distance</label><input type="range" id="ctBackMm" min="0.2" max="10" step="0.1" value="2"><span class="v"><span id="ctBackMmV">2</span> mm</span></div>
@@ -1112,13 +1112,13 @@ body.nonotes aside small{display:none}
   function newCtrl(o) {
     const c = Object.assign({ mode: 'continuous', rpmRun: 12, ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5 }, o || {});
     c.sensors = ((o && o.sensors) || [{}]).map(newSensor);
-    return Object.assign(c, { state: 'idle', queue: 0, tNext: 0, tStop: 0, cur: null, feeds: [], mRpm: 0, lash: null });
+    return Object.assign(c, { state: 'idle', queue: 0, needs: [], tNext: 0, tStop: 0, cur: null, feeds: [], mRpm: 0, lash: null });
   }
   function pillEvent(sim, C, k) {
     const sn = C.sensors[k], now = sim.t; sn.count++; sn.times.push(now); if (sn.times.length > 2000) sn.times.shift();
     if (k !== C.trigger || C.mode !== 'feed') return;
-    if (C.cur) { C.cur.n++; C.cur.times.push(now); }
-    if (C.state === 'feeding') { C.state = 'stopping'; C.tStop = now + C.stop_delay_ms * 1e-3; C.cur.tDet = now; }
+    if (C.cur) { C.cur.n++; C.cur.times.push(now); C.cur.tLast = now; }
+    if (C.state === 'feeding' && C.cur.n >= (C.cur.need || 1)) { C.state = 'stopping'; C.tStop = now + C.stop_delay_ms * 1e-3; C.cur.tDet = now; }   // a feed of N pills runs on until the N-th is counted
   }
   function ctrlStep(sim, dt) {
     const C = sim.ctrl, P = sim.P, now = sim.t;
@@ -1133,10 +1133,11 @@ body.nonotes aside small{display:none}
       if (sn.blk && !sn.armed && now - sn.tOn >= sn.min_block_ms * 1e-3 - 1e-12) { sn.armed = true; if (sn.count_on !== 'clear') pillEvent(sim, C, k); }
     }
     if (C.mode !== 'feed') return;
-    if (C.state === 'idle' && C.queue > 0 && now >= C.tNext) { C.queue--; C.state = 'feeding'; C.cur = { t0: now, n: 0, tDet: -1, tStop: -1, timeout: false, times: [] }; C.feeds.push(C.cur); if (C.feeds.length > 5000) C.feeds.shift(); }
-    if (C.state === 'feeding' && now - C.cur.t0 > C.timeout_s) { C.cur.timeout = true; C.state = 'idle'; C.cur.tStop = now; C.tNext = now + C.gap_ms * 1e-3; }
+    if (C.state === 'idle' && C.queue > 0 && now >= C.tNext) { C.queue--; C.state = 'feeding'; C.cur = { t0: now, tLast: now, need: Math.max(1, Math.round(C.needs.length ? C.needs.shift() : (C.pills_per_feed || 1))), n: 0, tDet: -1, tStop: -1, timeout: false, times: [] }; C.feeds.push(C.cur); if (C.feeds.length > 5000) C.feeds.shift(); }
+    if (C.state === 'feeding' && now - C.cur.tLast > C.timeout_s) {   // timeout counts from the start or the last pill counted
+      C.cur.timeout = true; C.state = 'idle'; C.cur.tStop = now; C.tNext = now + C.gap_ms * 1e-3; }
     if (C.state === 'stopping' && now >= C.tStop) {
-      if (C.backup && C.backup_mm > 0 && C.backup_mm_s > 0) { C.state = 'backup'; C.Spk = sim.S; C.bStop = false; }   // reverse the belts a set distance to pull the next pill back
+      if (C.backup && C.backup_mm > 0 && C.backup_mm_s > 0 && (C.cur.need || 1) === 1) { C.state = 'backup'; C.Spk = sim.S; C.bStop = false; }   // backup (single-pill feeds only): reverse the belts a set distance to pull the next pill back
       else { C.state = 'idle'; C.cur.tStop = now; C.tNext = now + C.gap_ms * 1e-3; }
     }
     // backup: belt surface travel measured from the furthest forward point (the forward run coasts down first);
@@ -1163,7 +1164,8 @@ body.nonotes aside small{display:none}
     const C = sim.ctrl; if (!C) return null; const done = C.feeds.filter((f, i) => i < C.feeds.length - 1 || (C.state === 'idle' && sim.t - f.tStop > 1.0));
     const ok = done.filter(f => !f.timeout), tt = ok.map(f => f.tDet - f.t0), m = tt.length ? tt.reduce((a, b) => a + b, 0) / tt.length : null;
     const sd = tt.length > 1 ? Math.sqrt(tt.reduce((a, b) => a + (b - m) * (b - m), 0) / (tt.length - 1)) : null;
-    return { feeds: done.length, singles: done.filter(f => f.n === 1).length, doubles: done.filter(f => f.n >= 2).length, empties: done.filter(f => f.n === 0).length, timeouts: done.filter(f => f.timeout).length, time_to_pill_mean_s: m, time_to_pill_sd_s: sd, time_to_pill_max_s: tt.length ? Math.max(...tt) : null };
+    // single = exactly the pills asked for, double = more than asked (extra pill), short = some but fewer (timed out)
+    return { feeds: done.length, singles: done.filter(f => f.n === (f.need || 1)).length, doubles: done.filter(f => f.n > (f.need || 1)).length, short: done.filter(f => f.n > 0 && f.n < (f.need || 1)).length, empties: done.filter(f => f.n === 0).length, timeouts: done.filter(f => f.timeout).length, time_to_pill_mean_s: m, time_to_pill_sd_s: sd, time_to_pill_max_s: tt.length ? Math.max(...tt) : null };
   }
   /* Dust settling (display): a speck falls straight down from where it was shed (Stokes settling, ~15 mm/s for
      ~20 um powder) until it meets the first surface below it -- a wall, the plate, the hopper, the glass or a belt --
@@ -1870,7 +1872,7 @@ body.nonotes aside small{display:none}
   $('geoReset').onclick = () => { S.geom = { bot: 0, top: 0, W: 8 }; syncUI(); applyGeom(); };
 
   /* ---- sensors + feed control (engine: newCtrl / ctrlStep) */
-  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, n: 10, sel: 0,
+  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, n: 1, sel: 0,
     sensors: [{ on: true, below_mm: 15 }, { on: false, below_mm: 25 }, { on: false, below_mm: 35 }].map(o => Object.assign({ side_mm: 0, axis: 'frontback', beam_mm: 1, response_ms: 0.5, min_block_ms: 1, count_on: 'break' }, o)) }; }
   function ctS() { if (!S.ctrl || !Array.isArray(S.ctrl.sensors)) S.ctrl = CT_DEF(); const d = CT_DEF(); for (const k in d) if (S.ctrl[k] == null) S.ctrl[k] = d[k]; S.ctrl.sensors = d.sensors.map((x, i) => Object.assign(x, S.ctrl.sensors[i] || {})); return S.ctrl; }
   function applyCtrl() {
@@ -1888,7 +1890,8 @@ body.nonotes aside small{display:none}
     $('ctMode').value = c.mode; $('ctN').value = c.n; $('ctVib').checked = !!c.vib_with_motor; $('snSel').value = c.sel;
     $('ctBack').checked = !!c.backup; for (const [id, v] of [['ctBackMm', c.backup_mm], ['ctBackV', c.backup_mm_s], ['ctLash', c.backlash_deg], ['ctDelay', c.stop_delay_ms], ['ctRamp', c.ramp_ms], ['ctTimeout', c.timeout_s], ['ctGap', c.gap_ms], ['snBelow', sn.below_mm], ['snSide', sn.side_mm], ['snBeam', sn.beam_mm], ['snResp', sn.response_ms], ['snMin', sn.min_block_ms]]) { $(id).value = v; $(id + 'V').textContent = v; }
     $('snOn').checked = !!sn.on; $('snTrig').checked = c.trigger === c.sel; $('snAxis').value = sn.axis; $('snEdge').value = sn.count_on;
-    for (const id of ['btnFeed', 'btnFeedN', 'btnFeedStop']) $(id).disabled = c.mode !== 'feed';
+    $('btnFeedStop').disabled = c.mode !== 'feed';
+    backUI();
   }
   $('ctBack').onchange = () => { ctS().backup = $('ctBack').checked; applyCtrl(); };
   for (const [id, k] of [['ctBackMm', 'backup_mm'], ['ctBackV', 'backup_mm_s'], ['ctLash', 'backlash_deg'], ['ctDelay', 'stop_delay_ms'], ['ctRamp', 'ramp_ms'], ['ctTimeout', 'timeout_s'], ['ctGap', 'gap_ms']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
@@ -1900,19 +1903,23 @@ body.nonotes aside small{display:none}
   $('snSel').onchange = () => { ctS().sel = +$('snSel').value; syncCtrlUI(); };
   $('ctMode').onchange = () => { ctS().mode = $('ctMode').value; applyCtrl(); syncCtrlUI(); };
   $('ctVib').onchange = () => { ctS().vib_with_motor = $('ctVib').checked; applyCtrl(); };
-  $('ctN').onchange = () => { ctS().n = Math.max(1, Math.round(+$('ctN').value) || 1); };
-  $('btnFeed').onclick = () => { if (sim.ctrl && sim.ctrl.mode === 'feed') sim.ctrl.queue++; };
-  $('btnFeedN').onclick = () => { if (sim.ctrl && sim.ctrl.mode === 'feed') sim.ctrl.queue += ctS().n; };
-  $('btnFeedStop').onclick = () => { const C = sim.ctrl; if (!C) return; C.queue = 0; if (C.state !== 'idle') { C.state = 'idle'; if (C.cur) { C.cur.tStop = sim.t; C.cur.aborted = true; } C.tNext = sim.t; } };
+  // backup only makes sense after a single pill: grey it out while the multi-pill count is above 1
+  function backUI() { const multi = (ctS().n || 1) > 1; for (const id of ['ctBack', 'ctBackMm', 'ctBackV']) { const e = $(id); e.disabled = multi; const r = e.closest('.row'); if (r) { r.style.opacity = multi ? 0.4 : ''; r.title = multi ? 'Backup only runs after single-pill feeds — set the Feed × count to 1 to use it' : ''; } } }
+  $('ctN').onchange = $('ctN').oninput = () => { ctS().n = Math.max(1, Math.round(+$('ctN').value) || 1); backUI(); };
+  // pressing a Feed button in Continuous mode switches to Feed on demand (belts stop, then the feed starts)
+  function feedReq(n) { if (ctS().mode !== 'feed') { ctS().mode = 'feed'; applyCtrl(); syncCtrlUI(); } const C = sim.ctrl; if (C) { C.needs.push(n); C.queue++; } }
+  $('btnFeed').onclick = () => feedReq(1);
+  $('btnFeedN').onclick = () => feedReq(ctS().n);
+  $('btnFeedStop').onclick = () => { const C = sim.ctrl; if (!C) return; C.queue = 0; C.needs.length = 0; if (C.state !== 'idle') { C.state = 'idle'; if (C.cur) { C.cur.tStop = sim.t; C.cur.aborted = true; } C.tNext = sim.t; } };
   function ctrlReadouts() {
     const C = sim.ctrl; if (!C) return; const P = sim.P;
     $('r_ct').textContent = C.mode !== 'feed' ? 'continuous · belts running' : C.state === 'feeding' ? `FEEDING ${fmt(sim.t - C.cur.t0, 1)} s · ${fmt(Math.abs(P.rpm), 0)} rpm${C.queue ? ' · ' + C.queue + ' queued' : ''}` : C.state === 'stopping' ? 'pill seen — stopping' : C.state === 'backup' ? `backing up ${fmt((C.cur && C.cur.backed || 0) * 1e3, 1)} / ${fmt(C.backup_mm, 1)} mm` : `stopped${C.queue ? ' · next in ' + fmt(Math.max(0, C.tNext - sim.t), 1) + ' s (' + C.queue + ' queued)' : ' · ready'}${P.rpm !== 0 ? ' (ramping down)' : ''}`;
     $('r_ct').style.color = C.state === 'feeding' ? '#7d9' : C.state === 'stopping' || C.state === 'backup' ? '#fc6' : '';
     $('r_sens').textContent = C.sensors.map((x, i) => x.on ? `S${i + 1}${i === C.trigger ? '*' : ''} ${x.out ? '■' : '□'} ${x.count}` : null).filter(Boolean).join(' · ') || 'none on';
     const fs = FFx.feedStats(sim), f = C.feeds[C.feeds.length - 1];
-    $('r_feed').textContent = !f ? '—' : f.timeout ? `no pill in ${fmt(C.timeout_s, 0)} s (timeout)` : f.aborted ? 'stopped by hand' : f.tDet < 0 ? 'waiting for a pill…' : `${f.n} pill${f.n === 1 ? '' : 's'} · ${fmt(f.tDet - f.t0, 2)} s to the sensor`;
-    $('r_feed').style.color = f && (f.n >= 2 || f.timeout) ? '#f66' : '';
-    $('r_feeds').textContent = fs && fs.feeds ? `${fs.feeds} done: ${fs.singles} single · ${fs.doubles} double+ · ${fs.empties} empty` : '—';
+    $('r_feed').textContent = !f ? '—' : f.timeout ? (f.n ? `${f.n} of ${f.need} — then no pill in ${fmt(C.timeout_s, 0)} s (timeout)` : `no pill in ${fmt(C.timeout_s, 0)} s (timeout)`) : f.aborted ? 'stopped by hand' : f.tDet < 0 ? (f.need > 1 ? `counting… ${f.n} of ${f.need}` : 'waiting for a pill…') : (f.need > 1 ? `${f.n} of ${f.need} pills · ${fmt(f.tDet - f.t0, 2)} s` : `${f.n} pill${f.n === 1 ? '' : 's'} · ${fmt(f.tDet - f.t0, 2)} s to the sensor`);
+    $('r_feed').style.color = f && (f.n > (f.need || 1) || f.timeout) ? '#f66' : '';
+    $('r_feeds').textContent = fs && fs.feeds ? `${fs.feeds} done: ${fs.singles} exact · ${fs.doubles} extra pill · ${fs.empties + (fs.short || 0)} short/empty` : '—';
     $('r_ttp').textContent = fs && fs.time_to_pill_mean_s != null ? `${fmt(fs.time_to_pill_mean_s, 2)} s mean${fs.time_to_pill_sd_s != null ? ' ± ' + fmt(fs.time_to_pill_sd_s, 2) : ''} · max ${fmt(fs.time_to_pill_max_s, 2)} s` : '—';
   }
   $('crushN').onchange = () => { const v = +$('crushN').value; S.crushN = v > 0 ? v : null; };
