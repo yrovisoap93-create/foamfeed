@@ -121,6 +121,13 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <small>Wear map (top belt A, bottom belt B; perimeter × width): red = permanent set (auto-scaled), grey = recovering dents</small>
 <canvas id="cWear" class="ch" width="280" height="50" style="image-rendering:pixelated"></canvas>
 <div class="btns"><button id="btnWear">Reset foam wear</button></div>
+<h2>Pill loads</h2>
+<div class="kv"><b>Squeeze now</b><span id="r_sq"></span><b>Peak squeeze</b><span id="r_sqPk"></span><b>Peak pressure</b><span id="r_pr"></span><b>vs limit</b><span id="r_lim"></span></div>
+<div id="limBar" style="height:8px;background:#2a2d33;border-radius:4px;overflow:hidden;margin:2px 0 4px"><div id="limFill" style="height:100%;width:0;background:#7d9"></div></div>
+<div class="row"><label for="crushN" title="force that breaks this pill. Defaults: soft gel / gel cap 13 N (texture-analyser rupture with a 2 mm probe, a worst-case point load; between flat plates softgels typically take 100+ N), tablet 40 N (low end of typical breaking force, USP 1217). Enter your own measured value.">Crush limit</label><input type="number" id="crushN" min="0.1" step="0.5" value="40" style="width:70px"><span class="v">N</span></div>
+<div class="row"><label for="loadCol" title="tint each pill from its colour to red as its squeeze approaches the crush limit">Colour pills by load</label><input type="checkbox" id="loadCol" style="justify-self:start"></div>
+<small>Squeeze = the compressive force pinching a pill between opposing contacts (belts, walls, other pills), 5 ms average. Pressure = highest local foam contact stress on any pill.</small>
+<div class="btns"><button id="btnPeak">Reset peaks</button></div>
 <h2>View</h2>
 <div class="row"><label>Hopper opacity</label><input type="range" id="hopA" min="0" max="1" step="0.02" value="0.22"><span class="v"></span></div>
 <div class="row"><label><input type="checkbox" id="secOn"> Section cut</label><input type="range" id="secX" min="0" max="46" step="0.5" value="22.5"><span class="v"><span id="secXV">22.5</span></span></div>
@@ -699,7 +706,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     sim.setPillSpec = function (spec) { sim.pillSpec = normSpec(spec); sim.pillType = makePillType(sim.pillSpec); return sim.pillType; };
     sim.setPillSpec(opts.pill || {});
     sim.bodies = newBodies();
-    sim.reset = function (clearFoam) { sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; if (clearFoam) sim.resetFoam(); };
+    sim.reset = function (clearFoam) { sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); } sim.wearT = 0; };
     sim.addPills = function (n, region) { return addPills(sim, n, region); };
     sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) stepOnce(sim); };
@@ -716,7 +723,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       q: new Float64Array(cap * 4), vx: new Float64Array(cap), vy: new Float64Array(cap), vz: new Float64Array(cap),
       wx: new Float64Array(cap), wy: new Float64Array(cap), wz: new Float64Array(cap),
       fx: new Float64Array(cap), fy: new Float64Array(cap), fz: new Float64Array(cap), tx: new Float64Array(cap), ty: new Float64Array(cap), tz: new Float64Array(cap),
-      type: [], alive: new Uint8Array(cap), nc: new Uint16Array(cap), ncp: new Uint16Array(cap), id: new Int32Array(cap), exitT: new Float64Array(cap).fill(-1), hue: new Float32Array(cap), seq: 0, xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9) };
+      type: [], alive: new Uint8Array(cap), nc: new Uint16Array(cap), ncp: new Uint16Array(cap), id: new Int32Array(cap), exitT: new Float64Array(cap).fill(-1), hue: new Float32Array(cap), seq: 0,
+      // contact load bookkeeping (normal forces only): per-step sums, then filtered squeeze / pressure and their run peaks
+      lS: new Float64Array(cap), lX: new Float64Array(cap), lY: new Float64Array(cap), lZ: new Float64Array(cap), pM: new Float64Array(cap),
+      sq: new Float64Array(cap), sqPk: new Float64Array(cap), pr: new Float64Array(cap), prPk: new Float64Array(cap), xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9) };
   }
 
   function addPills(sim, n, region) {
@@ -905,7 +915,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const vrx = px_ - svx - bumpV * nx, vry = py_ - svy - bumpV * ny, vrz = pz_ - svz - bumpV * nz;
     const vn = vrx * nx + vry * ny + vrz * nz;              // >0 : separating
     const vtx = vrx - vn * nx, vty = vry - vn * ny, vtz = vrz - vn * nz;
-    let Fn = 0, Fv = 0, epsAcc = 0, nAct = 0, Gq = 0, Gv = 0, Gw = 0, a2 = 0;
+    let Fn = 0, Fv = 0, epsAcc = 0, nAct = 0, Gq = 0, Gv = 0, Gw = 0, a2 = 0, pMax = 0;
     let SX = 0, SU = 0, SV = 0, AXx = 0, AXy = 0, AXz = 0, AUx = 0, AUy = 0, AUz = 0, AVx = 0, AVy = 0, AVz = 0;   // patch-normal force sums (belt frame) + their moments
     const dvc = sim.W / cl.nv, cellA = cl.dq * dvc, wearX = P.wearX > 0 ? P.wearX : 1;
     // one foam "spring" per surface patch: local compression -> stress (with hysteresis/viscosity) x patch area
@@ -918,7 +928,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       const sgm = foamStress(e, f) * (1 - f.H * Math.max(0, -Math.tanh(edot / 5)));
       Fv += f.E * f.tauV * edot * dA;
       const dF = sgm * dA + (stop > 0 ? P.contactFreq * P.contactFreq * T.mass * stop * dA / Math.max(T.surfArea * 0.25, dA) : 0);
-      Fn += dF; epsAcc += e * dA; nAct += dA; a2 += dA / PI;
+      Fn += dF; epsAcc += e * dA; nAct += dA; a2 += dA / PI; if (dF > pMax * dA) pMax = dF / dA;
       if (e > 0.02) {
         const wA = dA < cellA ? dA / cellA : 1;   // share of this 1 mm cell the patch covers (no double counting)
         if (ep < f.fpermMax) { cv[c] += (f.kc * Math.max(0, e - f.epsY) + f.ks * e) * dt * wA; ci[c] += (f.cset > 0 ? f.cset : 0) / CSET_T * (e / 0.5) * (e / 0.5) * wearX * dt * wA; }
@@ -981,6 +991,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       Tx = cy * Fz - cz * Fy; Ty = cz * Fx - cx * Fz; Tz = cx * Fy - cy * Fx;
     }
     B.fx[bi] += Fx; B.fy[bi] += Fy; B.fz[bi] += Fz;
+    { const nX = Fx - ftx, nY = Fy - fty, nZ = Fz - ftz; B.lS[bi] += Math.hypot(nX, nY, nZ); B.lX[bi] += nX; B.lY[bi] += nY; B.lZ[bi] += nZ; if (pMax > B.pM[bi]) B.pM[bi] = pMax; }
     const wn = B.wx[bi] * nx + B.wy[bi] * ny + B.wz[bi] * nz;
     const wtx = B.wx[bi] - wn * nx, wty = B.wy[bi] - wn * ny, wtz = B.wz[bi] - wn * nz, wt = Math.hypot(wtx, wty, wtz);
     if (wt > 1e-9) { let tm = (0.15 + f.H) * a * Fn * Math.min(wt, 1); const lim = 0.5 * T.Imin * wt / dt / shr; if (tm > lim) tm = lim; Tx -= tm * wtx / wt; Ty -= tm * wty / wt; Tz -= tm * wtz / wt; }
@@ -1034,7 +1045,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
         ns++;
       }
       B.fx[i] = g[0] * T.mass; B.fy[i] = g[1] * T.mass; B.fz[i] = g[2] * T.mass; B.tx[i] = B.ty[i] = B.tz[i] = 0;
-      B.ncp[i] = Math.max(1, B.nc[i]); B.nc[i] = 0;   // contacts last step: each contact's 'stop the slip' cap is shared between them
+      B.ncp[i] = Math.max(1, B.nc[i]); B.nc[i] = 0; B.lS[i] = B.lX[i] = B.lY[i] = B.lZ[i] = B.pM[i] = 0;   // contacts last step: each contact's 'stop the slip' cap is shared between them
     }
     sim.nSpheres = ns;
     sim.stats.meanEps = 0; sim.stats.contacts = 0; sim.stats.maxEps = 0; sim.stats.powerAcc = 0;
@@ -1078,6 +1089,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
             const ftx = _ft[0], fty = _ft[1], ftz = _ft[2];
             const Fx = Fn * nx + ftx, Fy = Fn * ny + fty, Fz = Fn * nz + ftz;
             B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz; B.fx[j] -= Fx; B.fy[j] -= Fy; B.fz[j] -= Fz;
+            B.lS[i] += Fn; B.lX[i] += Fn * nx; B.lY[i] += Fn * ny; B.lZ[i] += Fn * nz; B.lS[j] += Fn; B.lX[j] -= Fn * nx; B.lY[j] -= Fn * ny; B.lZ[j] -= Fn * nz;
             let rx = cxm - B.px[i], ry = cym - B.py[i], rz = czm - B.pz[i];
             B.tx[i] += ry * Fz - rz * Fy; B.ty[i] += rz * Fx - rx * Fz; B.tz[i] += rx * Fy - ry * Fx;
             rx = cxm - B.px[j]; ry = cym - B.py[j]; rz = czm - B.pz[j];
@@ -1112,7 +1124,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
           // normal force per triangle now; friction once per sphere below (one stick spring per sphere-wall contact)
           wFn += Fn; if (pen > wPen) { wPen = pen; wnx = nx; wny = ny; wnz = nz; wrx = rx; wry = ry; wrz = rz; wvx = cvx - vn * nx; wvy = cvy - vn * ny; wvz = cvz - vn * nz; }
           const Fx = Fn * nx, Fy = Fn * ny, Fz = Fn * nz;
-          B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz;
+          B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz; B.lS[i] += Fn; B.lX[i] += Fx; B.lY[i] += Fy; B.lZ[i] += Fz;
           B.tx[i] += ry * Fz - rz * Fy; B.ty[i] += rz * Fx - rx * Fz; B.tz[i] += rx * Fy - ry * Fx;
         }
         if (wPen >= 0) {
@@ -1152,6 +1164,18 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       if (B.pz[i] < 0.0 || B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } }
     }
     sim.t += dt; sim.steps++; sim.wearT += dt;
+    // pill loads. Squeeze = compressive part of the contact normal forces: (sum |F_n| - |sum F_n|) / 2 -- for a pill
+    // pinched between two belts with F each side it is F; resting on one surface it is ~0. Pressure = highest local foam
+    // contact stress on the pill (exact per surface patch). Both low-pass filtered over 5 ms: the sustained load that
+    // crushes a capsule, not single-step impact spikes (impact peaks depend on the numerical contact stiffness).
+    { const kf = 1 - Math.exp(-dt / 5e-3); let sqM = 0, prM = 0, iM = -1;
+      for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue;
+        const sq = 0.5 * Math.max(0, B.lS[i] - Math.hypot(B.lX[i], B.lY[i], B.lZ[i]));
+        B.sq[i] += (sq - B.sq[i]) * kf; B.pr[i] += (B.pM[i] - B.pr[i]) * kf;
+        if (B.sq[i] > B.sqPk[i]) B.sqPk[i] = B.sq[i]; if (B.pr[i] > B.prPk[i]) B.prPk[i] = B.pr[i];
+        if (B.sq[i] > sqM) { sqM = B.sq[i]; iM = i; } if (B.pr[i] > prM) prM = B.pr[i]; }
+      const st = sim.stats; st.sqNow = sqM; st.sqNowId = iM; st.prNow = prM;
+      if (sqM > (st.sqPk || 0)) { st.sqPk = sqM; st.sqPkT = sim.t; st.sqPkId = iM; } if (prM > (st.prPk || 0)) st.prPk = prM; }
     if ((sim.steps & 15) === 0) {
       const f = sim.foam, cl = sim.cells, dtr = dt * 16, kr = Math.exp(-dtr / f.tauRec), kd = Math.exp(-dtr / 0.05);
       for (let b = 0; b < 2; b++) { const cv = cl.vis[b], tc = cl.touched[b], dn = cl.dent[b]; for (let c = 0; c < cv.length; c++) { if (!tc[c]) cv[c] *= kr; else tc[c] = 0; dn[c] *= kd; } }
@@ -1173,7 +1197,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     foamName: 'PU open-cell', shore: 50, thick: 4.0, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
     count: 40, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
-    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 },   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
+    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, crushN: null, loadCol: false,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
   };
   let sim = null, pending = null;
 
@@ -1428,7 +1452,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     // pills
     const B = sim.bodies;
     for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue; const M = m4.fromQP([B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3]], [B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3]);
-      draw(pillMesh, M, hsv(B.hue[i]), 1, false, true); }
+      let c = hsv(B.hue[i]); if (S.loadCol) { const f = Math.min(1, (B.sq[i] || 0) / crushLimit()), w = Math.min(1, Math.sqrt(f)); c = [c[0] + (1 - c[0]) * w, c[1] * (1 - w), c[2] * (1 - w)]; }
+      draw(pillMesh, M, c, 1, false, true); }
     // hopper translucent
     if (S.hopperAlpha > 0.01) { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'hopper') draw(p.mesh, I, ROLECOL.hopper, S.hopperAlpha, true); else if (p.role === 'throat') draw(p.mesh, I, [0.98, 0.72, 0.35], Math.min(1, S.hopperAlpha * 1.8 + 0.12), true); gl.depthMask(true); }
     if (S.glass) { gl.enable(gl.BLEND); gl.depthMask(false); draw(glassMeshGL, I, [0.78, 0.93, 1.0], 0.16, true); gl.depthMask(true); }
@@ -1491,8 +1516,17 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const fr = Math.min(1, maxP / 0.10); $('wearFill').style.width = (fr * 100).toFixed(1) + '%'; $('wearFill').style.background = fr < 0.5 ? '#7d9' : fr < 0.85 ? '#fc6' : '#f66'; $('r_trq').textContent = fmt(Pw / om * 1e3, 2) + ' mN·m (belt friction load)';
     $('r_t').textContent = fmt(sim.t, 1) + ' s'; $('r_rtf').textContent = fmt(rtf, 2) + '× real time'; $('r_sph').textContent = sim.nSpheres || 0;
     $('r_worm').textContent = fmt(Math.abs(P.rpm) * P.wormRatio, 0) + ' rpm worm (1:' + P.wormRatio + ')';
+    if (!(S.crushN > 0) && document.activeElement !== $('crushN')) $('crushN').value = defaultCrush(sim.pillType.spec);   // follows the pill type until you type your own
+    { const st = sim.stats, lim = crushLimit(), B = sim.bodies, pk = st.sqPk || 0, fN = x => x >= 1 ? fmt(x, 2) + ' N' : fmt(x * 1e3, 0) + ' mN';
+      $('r_sq').textContent = st.sqNow > 0 ? `${fN(st.sqNow)} (pill #${B.id[st.sqNowId]})` : '—';
+      $('r_sqPk').textContent = pk > 0 ? `${fN(pk)} (pill #${B.id[st.sqPkId] ?? '?'} at ${fmt(st.sqPkT, 1)} s)` : '—';
+      $('r_pr').textContent = st.prPk > 0 ? `${fmt(st.prPk / 1e3, 0)} kPa peak · ${fmt((st.prNow || 0) / 1e3, 0)} kPa now (foam contact)` : '—';
+      const fr = pk / lim; $('r_lim').textContent = `${fmt(fr * 100, fr < 0.1 ? 1 : 0)}% of ${fmt(lim, 1)} N` + (fr >= 1 ? ' — OVER: would crush' : fr > 0.5 ? ' — under 2× safety margin' : ' — OK'); $('r_lim').style.color = fr >= 1 ? '#f66' : fr > 0.5 ? '#fc6' : '#7d9';
+      $('limFill').style.width = Math.min(100, fr * 100).toFixed(1) + '%'; $('limFill').style.background = fr >= 1 ? '#f66' : fr > 0.5 ? '#fc6' : '#7d9'; }
     drawCharts();
   }
+  function defaultCrush(sp) { return sp.shape === 'tablet' ? 40 : 13; }
+  function crushLimit() { return S.crushN > 0 ? S.crushN : defaultCrush(sim.pillType.spec); }
 
   /* ---------------------------------------------------------------- main loop */
   let trial = null; const trialRows = [];
@@ -1527,7 +1561,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 
   function syncUI() {
     if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
-    S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
+    S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; if (sim) $('crushN').value = S.crushN > 0 ? S.crushN : defaultCrush(sim.pillType.spec); $('loadCol').checked = !!S.loadCol; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
     $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; $('count').value = S.count;
     $('camPhase').value = S.camPhase;
@@ -1564,6 +1598,9 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     $(id).addEventListener('change', () => { S.geom[k] = +$(id).value; applyGeom(); });
   }
   $('geoReset').onclick = () => { S.geom = { bot: 0, top: 0, W: 8 }; syncUI(); applyGeom(); };
+  $('crushN').onchange = () => { const v = +$('crushN').value; S.crushN = v > 0 ? v : null; };
+  $('loadCol').onchange = () => { S.loadCol = $('loadCol').checked; };
+  $('btnPeak').onclick = () => { sim.stats.sqPk = 0; sim.stats.prPk = 0; const B = sim.bodies; B.sqPk.fill(0); B.prPk.fill(0); };
   $('wearX').onchange = () => { S.wearX = +$('wearX').value; sim.P.wearX = S.wearX; };
   hook('rpm', v => { S.rpm = +v; applyParams(); });
   hook('grav', v => { S.g = +v; applyParams(); });
