@@ -46,6 +46,13 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="row"><label for="rpm" title="both cams are tied by the worm; sign flips the belt direction">Cam speed</label><input type="range" id="rpm" min="-60" max="60" step="0.5" value="12"><span class="v"><span id="rpmV"></span> rpm</span></div>
 <div class="row"><label for="camPhase" title="phase offset of the second cam (0 = mirrored, both pinch together)">Cam B phase</label><input type="range" id="camPhase" min="-180" max="180" step="5" value="0"><span class="v"><span id="camPhaseV"></span>°</span></div>
 <label class="note"><input type="checkbox" id="camBump" checked> cam lobes push the belt (real CAD profile)</label>
+<h2>Vibration (speaker)</h2>
+<div class="btns"><button id="vibBtn">🔈 Vibration OFF</button></div>
+<div class="row"><label for="vibF">Frequency</label><input type="range" id="vibF" min="10" max="200" step="1" value="40"><span class="v"><span id="vibFV">40</span> Hz</span></div>
+<div class="row"><label for="vibA" title="peak acceleration the speaker puts into the cartridge, in g (1 g = 9.81 m/s²)">Strength</label><input type="range" id="vibA" min="0.05" max="3" step="0.05" value="0.5"><span class="v"><span id="vibAV">0.5</span> g</span></div>
+<div class="row"><label for="vibDir">Shake axis</label><select id="vibDir" style="grid-column:2/4"><option value="plate">through the back plate (speaker behind plate)</option><option value="vert">vertical</option><option value="across">across (side to side)</option><option value="incline">along the incline</option></select></div>
+<div class="note" id="vibInfo"></div>
+<details><summary>How vibration is modelled</summary><small>The whole cartridge (hopper, plate, belts) is shaken rigidly and sinusoidally; in the cartridge's frame that is an oscillating extra gravity on every pill, so lift-off, bouncing and walking along the walls all come out of the normal contact physics. Strength is peak acceleration; above ~1 g pills briefly leave the surfaces each cycle. A 23 mm speaker at 40 Hz is far below its resonance and moves very little air — the real transmitted acceleration depends on how it is coupled to the frame, so measure it (phone accelerometer app on the cartridge) and set Strength to match.</small></details>
 <h2>Belt texture</h2>
 <small>Paint one tile of the belt surface. It repeats seamlessly around both belts and is part of the physics: ridges stand proud of the foam, grooves are cut into it, and their flanks push pills sideways / along. Arrow = direction of belt travel.</small>
 <div class="seg" id="texTool"><button data-t="1" class="on">▲ Ridge</button><button data-t="-1">▼ Groove</button><button data-t="0">Erase</button></div>
@@ -324,6 +331,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     camBump: 1,              // 1 = real cam lobe geometry, 0 = off
     phaseB: 0,               // cam B phase offset (rad)
     muFoamScale: 1,
+    vib: null,               // { on, freq (Hz), accel_g (peak, in g), dir: unit vector (world) }
     contactFreq: 1800,       // rad/s: pill-pill / pill-wall contact stiffness = m_eff * contactFreq^2 (keeps the explicit integrator stable)
   };
 
@@ -600,7 +608,11 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   let _nxt = new Int32Array(CAPS); const _key = new Int32Array(CAPS);
   let _head = new Int32Array(1 << 16).fill(-1);
   function stepOnce(sim) {
-    const P = sim.P, B = sim.bodies, dt = P.dt, g = P.gravity, n = B.n;
+    const P = sim.P, B = sim.bodies, dt = P.dt, n = B.n;
+    // Vibration (speaker): the whole cartridge shakes sinusoidally. In the cartridge's own frame that is exactly an
+    // oscillating extra gravity, g_eff = g - a_frame(t), with a_frame = a_peak * sin(2*pi*f*t) along the drive axis.
+    let g = P.gravity;
+    if (P.vib && P.vib.on) { const V = P.vib, a = V.accel_g * 9.81 * Math.sin(TAU * V.freq * sim.t), d = V.dir; g = [g[0] - a * d[0], g[1] - a * d[1], g[2] - a * d[2]]; }
     const PPX = B.ppx || (B.ppx = new Map());
     if ((sim.steps & 1023) === 0) for (const [k_, e_] of PPX) if (e_[3] < sim.steps) PPX.delete(k_);   // drop broken pill-pill contacts
     sim.omegaCam = -P.rpm * TAU / 60;
@@ -751,7 +763,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   const S = {
     foamName: 'PU open-cell', shore: 50, thick: 4.0, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
-    count: 40, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, showHeat: true, camPhase: 0, glass: true,
+    count: 40, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
   };
   let sim = null, pending = null;
 
@@ -765,6 +777,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   function applyParams() {
     if (!sim) return;
     if (typeof TEX !== 'undefined' && sim.cells) applyTex();
+    applyVib();
     sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180;
   }
   function applyFoam() { // keep wear state, replace material
@@ -1051,6 +1064,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
 
   function syncUI() {
+    if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
     $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; $('count').value = S.count;
     $('camPhase').value = S.camPhase;
@@ -1348,6 +1362,20 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     e.target.value = '';
   };
   $('camReset').onclick = () => { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; rebuildGLParts(); rebuildPills(); $('camInfo').textContent = 'Original CAD cam.'; };
+
+  /* ================================================================ vibration */
+  function vibAxis(a) { return a === 'vert' ? [0, 0, 1] : a === 'across' ? EX.slice() : a === 'incline' ? EU.slice() : EV.slice(); }
+  function applyVib() {
+    const V = S.vib; if (!sim) return;
+    sim.P.vib = { on: V.on, freq: V.freq, accel_g: V.accel_g, dir: vibAxis(V.axis) };
+    const w = TAU * V.freq, amp = V.accel_g * 9.81 / (w * w) * 1e3, vel = V.accel_g * 9.81 / w * 1e3;
+    $('vibBtn').textContent = V.on ? `🔊 Vibration ON — ${V.freq} Hz` : '🔈 Vibration OFF'; $('vibBtn').classList.toggle('pri', V.on);
+    $('vibInfo').innerHTML = `${V.accel_g} g peak at ${V.freq} Hz = ±${amp < 0.1 ? amp.toFixed(3) : amp.toFixed(2)} mm, ${vel.toFixed(0)} mm/s peak` + (V.accel_g > 1 ? ' · <span class="warn">above 1 g: pills hop each cycle</span>' : '');
+  }
+  $('vibBtn').onclick = () => { S.vib.on = !S.vib.on; applyVib(); };
+  $('vibF').oninput = e => { S.vib.freq = +e.target.value; $('vibFV').textContent = e.target.value; applyVib(); };
+  $('vibA').oninput = e => { S.vib.accel_g = +e.target.value; $('vibAV').textContent = e.target.value; applyVib(); };
+  $('vibDir').onchange = e => { S.vib.axis = e.target.value; applyVib(); };
 
   // test hooks
   window.__FF = { get sim() { return sim; }, S, cam, setPreset, frame, step: n => sim.step(n), render };
