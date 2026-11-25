@@ -41,7 +41,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="note" id="ild" style="margin:4px 0"></div>
 <canvas id="cSS" class="ch" width="300" height="110"></canvas>
 <small>blue = loading curve, orange dashed = unloading (hysteresis)</small>
-<details><summary>Foam model parameters</summary><div class="row"><label for="a_eps1" title="strain where the stress-strain curve leaves the linear region and enters the plateau">Elastic limit strain</label><input type="range" id="a_eps1" min="0.03" max="0.3" step="0.01" value="0.15"><span class="v"><span id="a_eps1V"></span></span></div><div class="row"><label for="a_epsD" title="strain where cells are crushed flat and stiffness shoots up">Densification strain</label><input type="range" id="a_epsD" min="0.4" max="0.8" step="0.01" value="0.65"><span class="v"><span id="a_epsDV"></span></span></div><div class="row"><label for="a_epsY" title="strain above which permanent set accumulates">Crush (yield) strain</label><input type="range" id="a_epsY" min="0.05" max="0.7" step="0.01" value="0.45"><span class="v"><span id="a_epsYV"></span></span></div><div class="row"><label for="a_kc" title="permanent-set growth rate per unit overstrain">Crush rate</label><input type="range" id="a_kc" min="0" max="6" step="0.1" value="1.2"><span class="v"><span id="a_kcV"></span> /s</span></div><div class="row"><label for="a_fperm" title="share of the set that never recovers (rest recovers with the time constant below)">Permanent fraction</label><input type="range" id="a_fperm" min="0" max="1" step="0.01" value="0.25"><span class="v"><span id="a_fpermV"></span></span></div><div class="row"><label for="a_tauRec" title="time constant for the recoverable part of the set">Recovery time</label><input type="range" id="a_tauRec" min="0.1" max="20" step="0.1" value="1.5"><span class="v"><span id="a_tauRecV"></span> s</span></div><div class="row"><label for="a_H" title="unloading branch stress = (1-H) x loading branch">Hysteresis (energy loss)</label><input type="range" id="a_H" min="0" max="0.9" step="0.01" value="0.3"><span class="v"><span id="a_HV"></span></span></div><div class="row"><label for="a_tauV" title="damping stress = E * tau * strain-rate">Viscous loss time</label><input type="range" id="a_tauV" min="0" max="0.05" step="0.001" value="0.004"><span class="v"><span id="a_tauVV"></span> s</span></div><div class="row"><label for="a_grip" title="multiplies pill-vs-foam friction coefficient">Foam grip factor</label><input type="range" id="a_grip" min="0.3" max="2.5" step="0.05" value="1.1"><span class="v"><span id="a_gripV"></span></span></div><div class="row"><label for="a_adh" title="adhesive pressure on the contact patch, adds to friction limit">Surface tack</label><input type="range" id="a_adh" min="0" max="4000" step="50" value="300"><span class="v"><span id="a_adhV"></span> Pa</span></div></details>
+<details><summary>Foam model parameters</summary><div class="row"><label for="a_eps1" title="strain where the stress-strain curve leaves the linear region and enters the plateau">Elastic limit strain</label><input type="range" id="a_eps1" min="0.03" max="0.3" step="0.01" value="0.15"><span class="v"><span id="a_eps1V"></span></span></div><div class="row"><label for="a_epsD" title="strain where cells are crushed flat and stiffness shoots up">Densification strain</label><input type="range" id="a_epsD" min="0.4" max="0.8" step="0.01" value="0.65"><span class="v"><span id="a_epsDV"></span></span></div><div class="row"><label for="a_epsY" title="strain above which permanent set accumulates">Crush (yield) strain</label><input type="range" id="a_epsY" min="0.05" max="0.7" step="0.01" value="0.45"><span class="v"><span id="a_epsYV"></span></span></div><div class="row"><label for="a_kc" title="recoverable dent (viscoelastic set) growth per second per unit strain above the crush strain; recovers with the recovery time below">Dent creep rate</label><input type="range" id="a_kc" min="0" max="3" step="0.005" value="0.077"><span class="v"><span id="a_kcV"></span> /s</span></div><div class="row"><label for="a_cset" title="permanent thickness loss after 22 h at 50% compression (compression-set test). Drives true wear; scaled by strain² and time under load">Compression set</label><input type="range" id="a_cset" min="0" max="0.4" step="0.005" value="0.05"><span class="v"><span id="a_csetV"></span></span></div><div class="row"><label for="a_tauRec" title="time constant for the recoverable part of the set">Recovery time</label><input type="range" id="a_tauRec" min="0.1" max="20" step="0.1" value="1.5"><span class="v"><span id="a_tauRecV"></span> s</span></div><div class="row"><label for="a_H" title="unloading branch stress = (1-H) x loading branch">Hysteresis (energy loss)</label><input type="range" id="a_H" min="0" max="0.9" step="0.01" value="0.3"><span class="v"><span id="a_HV"></span></span></div><div class="row"><label for="a_tauV" title="damping stress = E * tau * strain-rate">Viscous loss time</label><input type="range" id="a_tauV" min="0" max="0.05" step="0.001" value="0.004"><span class="v"><span id="a_tauVV"></span> s</span></div><div class="row"><label for="a_grip" title="multiplies pill-vs-foam friction coefficient">Foam grip factor</label><input type="range" id="a_grip" min="0.3" max="2.5" step="0.05" value="1.1"><span class="v"><span id="a_gripV"></span></span></div><div class="row"><label for="a_adh" title="adhesive pressure on the contact patch, adds to friction limit">Surface tack</label><input type="range" id="a_adh" min="0" max="4000" step="50" value="300"><span class="v"><span id="a_adhV"></span> Pa</span></div></details>
+<h2>Belt layout</h2>
+<div class="row"><label for="geoBot" title="move the bottom idler bearing stack along the incline (negative = lower, longer belt)">Bottom idler</label><input type="range" id="geoBot" min="-20" max="3" step="0.5" value="0"><span class="v"><span id="geoBotV"></span> mm</span></div>
+<div class="row"><label for="geoTop" title="move the top idler bearing stack along the incline (positive = higher, longer belt)">Top idler</label><input type="range" id="geoTop" min="-6" max="20" step="0.5" value="0"><span class="v"><span id="geoTopV"></span> mm</span></div>
+<div class="row"><label for="geoW" title="belt width across the face (bearing stack height). 8 mm matches the CAD; the idlers, cams, caps and front glass move out with it">Belt width</label><input type="range" id="geoW" min="8" max="14" step="0.5" value="8"><span class="v"><span id="geoWV"></span> mm</span></div>
+<div class="row"><label title="stretch the container and back plate with the belts (the container walls keep spanning the idlers, its throat stays at the top of the belts, its front face stays flush with the belt face). Untick to test the belts against the unchanged CAD container">Container follows</label><input type="checkbox" id="hopFollow" checked style="justify-self:start"></div>
+<div class="note" id="geoInfo" style="margin:4px 0"></div>
+<div class="btns"><button id="geoReset">Reset to CAD layout</button></div>
 <h2>Drive</h2>
 <div class="row"><label for="rpm" title="both cams are tied by the worm; sign flips the belt direction">Cam speed</label><input type="range" id="rpm" min="-60" max="60" step="0.5" value="12"><span class="v"><span id="rpmV"></span> rpm</span></div>
 <div class="row"><label for="camPhase" title="phase offset of the second cam (0 = mirrored, both pinch together)">Cam B phase</label><input type="range" id="camPhase" min="-180" max="180" step="5" value="0"><span class="v"><span id="camPhaseV"></span>°</span></div>
@@ -98,14 +105,16 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="kv"><b>Dispensed</b><span id="r_disp"></span><b>Rate (20 s)</b><span id="r_rate"></span><b>Interval</b><span id="r_iv"></span><b>Doubles</b><span id="r_dbl"></span><b>In hopper</b><span id="r_hop"></span><b>Escaped</b><span id="r_lost"></span><b>Status</b><span id="r_jam"></span></div>
 <canvas id="cDisp" class="ch" width="280" height="80"></canvas>
 <h2>Belts</h2>
-<div class="kv"><b>Belt speed</b><span id="r_belt"></span><b>Worm</b><span id="r_worm"></span><b>Nip gap</b><span id="r_nip"></span><b>Foam strain</b><span id="r_eps"></span><b>Plastic set</b><span id="r_set"></span><b>Drive load</b><span id="r_trq"></span></div>
-<small>Plastic set map (top belt A, bottom belt B; belt perimeter × width)</small>
+<div class="kv"><b>Belt speed</b><span id="r_belt"></span><b>Worm</b><span id="r_worm"></span><b>Nip gap</b><span id="r_nip"></span><b>Foam strain</b><span id="r_eps"></span><b>Foam wear</b><span id="r_set"></span><b>Dents</b><span id="r_dent"></span><b>Foam life</b><span id="r_life"></span><b>Drive load</b><span id="r_trq"></span></div>
+<div class="row"><label title="speeds up only the permanent wear so you can preview long-term use; dents and everything else stay real-time">Wear time-lapse</label><select id="wearX" style="grid-column:2/4"><option value="1">real time (×1)</option><option value="100">×100</option><option value="1000">×1,000 (1 s ≈ 17 min)</option><option value="10000">×10,000 (1 s ≈ 2.8 h)</option><option value="100000">×100,000 (1 s ≈ 28 h)</option><option value="1000000">×1,000,000 (1 s ≈ 12 days)</option></select></div>
+<div id="wearBar" style="height:8px;background:#2a2d33;border-radius:4px;overflow:hidden;margin:2px 0 4px"><div id="wearFill" style="height:100%;width:0;background:#7d9"></div></div>
+<small>Wear map (top belt A, bottom belt B; perimeter × width): red = permanent set (auto-scaled), grey = recovering dents</small>
 <canvas id="cWear" class="ch" width="280" height="50" style="image-rendering:pixelated"></canvas>
 <div class="btns"><button id="btnWear">Reset foam wear</button></div>
 <h2>View</h2>
 <div class="row"><label>Hopper opacity</label><input type="range" id="hopA" min="0" max="1" step="0.02" value="0.22"><span class="v"></span></div>
 <div class="row"><label><input type="checkbox" id="secOn"> Section cut</label><input type="range" id="secX" min="0" max="46" step="0.5" value="22.5"><span class="v"><span id="secXV">22.5</span></span></div>
-<label class="note"><input type="checkbox" id="heat" checked> colour belt by plastic set</label>
+<label class="note"><input type="checkbox" id="heat" checked> colour belt by wear</label>
 <label class="note"><input type="checkbox" id="glassOn" checked> front glass wall (rigid, closes conveyor face)</label>
 <h2>Trial runner</h2>
 <div class="row"><label>Duration</label><select id="trialT" style="grid-column:2/4"><option value="20">20 s</option><option value="40" selected>40 s</option><option value="90">90 s</option><option value="180">180 s</option></select></div>
@@ -154,14 +163,24 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   function shore00ToE(S) { return 0.0098e6 * Math.exp(0.052 * S); }
   function EToShore00(E) { return Math.log(E / 0.0098e6) / 0.052; }
 
+  /* Foam set has two parts (both per belt cell):
+     - recoverable set ("dent"): viscoelastic creep while loaded (kc above the crush strain epsY, ks below), recovering
+       with tauRec once unloaded. Rates are calibrated to the residual dent right after a 1 s squeeze to 80 %:
+       open-cell PU ~3 %, microcellular PU ~2 %, silicone ~1 %, EPDM ~5 %, EVA ~8 %, memory foam ~35 % (it is designed to
+       recover slowly, 3-10 s). These are the dents you see behind a pill; they fade like real foam.
+     - permanent set (true wear): from the material's compression set (cset = thickness lost after 22 h at 50 %
+       compression, ASTM D3574-D / D395-B style figures at room temperature), scaled by (strain/0.5)^2 and the time
+       actually spent compressed. One pill pass therefore costs ~1e-6 of the thickness: wear is invisible in a short run.
+       The "wear time-lapse" multiplier (P.wearX) speeds it up to preview months of use. */
   const FOAMS = {
-    'PU open-cell':       { S: 50, mult: 1.0, eps1: 0.15, epsD: 0.65, epsY: 0.45, kc: 1.2, ks: 0.004, fperm: 0.25, tauRec: 1.5, H: 0.30, tauV: 0.004, grip: 1.1, adh: 300 },
-    'EVA closed-cell':    { S: 70, mult: 1.6, eps1: 0.08, epsD: 0.60, epsY: 0.20, kc: 2.5, ks: 0.010, fperm: 0.75, tauRec: 6.0, H: 0.45, tauV: 0.006, grip: 0.8, adh: 50 },
-    'Silicone sponge':    { S: 55, mult: 1.0, eps1: 0.12, epsD: 0.62, epsY: 0.50, kc: 0.6, ks: 0.002, fperm: 0.10, tauRec: 0.8, H: 0.12, tauV: 0.003, grip: 1.7, adh: 1500 },
-    'EPDM / neoprene':    { S: 60, mult: 1.2, eps1: 0.10, epsD: 0.58, epsY: 0.35, kc: 1.5, ks: 0.006, fperm: 0.45, tauRec: 3.0, H: 0.30, tauV: 0.005, grip: 1.25, adh: 200 },
-    'Viscoelastic (memory)': { S: 35, mult: 0.8, eps1: 0.12, epsD: 0.70, epsY: 0.60, kc: 0.3, ks: 0.002, fperm: 0.03, tauRec: 4.0, H: 0.60, tauV: 0.030, grip: 1.3, adh: 800 },
-    'Microcellular PU':   { S: 75, mult: 1.3, eps1: 0.10, epsD: 0.55, epsY: 0.30, kc: 0.8, ks: 0.002, fperm: 0.20, tauRec: 1.0, H: 0.20, tauV: 0.003, grip: 1.0, adh: 150 },
+    'PU open-cell':       { S: 50, mult: 1.0, eps1: 0.15, epsD: 0.65, epsY: 0.45, kc: 0.077, ks: 0.004, cset: 0.05, tauRec: 1.5, H: 0.30, tauV: 0.004, grip: 1.1, adh: 300 },
+    'EVA closed-cell':    { S: 70, mult: 1.6, eps1: 0.08, epsD: 0.60, epsY: 0.20, kc: 0.12, ks: 0.010, cset: 0.15, tauRec: 6.0, H: 0.45, tauV: 0.006, grip: 0.8, adh: 50 },
+    'Silicone sponge':    { S: 55, mult: 1.0, eps1: 0.12, epsD: 0.62, epsY: 0.50, kc: 0.028, ks: 0.002, cset: 0.03, tauRec: 0.8, H: 0.12, tauV: 0.003, grip: 1.7, adh: 1500 },
+    'EPDM / neoprene':    { S: 60, mult: 1.2, eps1: 0.10, epsD: 0.58, epsY: 0.35, kc: 0.10, ks: 0.006, cset: 0.15, tauRec: 3.0, H: 0.30, tauV: 0.005, grip: 1.25, adh: 200 },
+    'Viscoelastic (memory)': { S: 35, mult: 0.8, eps1: 0.12, epsD: 0.70, epsY: 0.60, kc: 1.74, ks: 0.002, cset: 0.05, tauRec: 4.0, H: 0.60, tauV: 0.030, grip: 1.3, adh: 800 },
+    'Microcellular PU':   { S: 75, mult: 1.3, eps1: 0.10, epsD: 0.55, epsY: 0.30, kc: 0.037, ks: 0.002, cset: 0.02, tauRec: 1.0, H: 0.20, tauV: 0.003, grip: 1.0, adh: 150 },
   };
+  const CSET_T = 22 * 3600;   // s: compression-set test hold time
 
   function foamFromPreset(name, S) {
     const p = FOAMS[name], f = Object.assign({}, p);
@@ -437,6 +456,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     phaseB: 0,               // cam B phase offset (rad)
     muFoamScale: 1,
     vib: null,               // { on, freq (Hz), accel_g (peak, in g), dir: unit vector (world) }
+    wearX: 1,                // foam-wear time-lapse (1 = real time)
     contactFreq: 1800,       // rad/s: pill-pill / pill-wall contact stiffness = m_eff * contactFreq^2 (keeps the explicit integrator stable)
   };
 
@@ -449,35 +469,64 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   // so the glass steps in to 0.4 mm off the belt faces (v=8): x 7.4..15.6 clears the cam lobes (swept radius 7.1 mm).
   // Without the step, pills wedged edge-first into the 2.8 mm slot between the belt faces and the pane and jammed.
   const GLASS = [{ x0: -9, x1: 32, u0: -12, u1: 33, v0: 10.8, v1: 12.0 }, { x0: 7.4, x1: 15.6, u0: -12, u1: 33, v0: 8.4, v1: 10.8 }];
-  function glassMesh(cad) {
-    const F = cad.frame, v = [], t = [];
-    for (const g of GLASS) { const b = v.length / 3;
+  // belt layout (mm, frame-local): bottom / top idler centre along u, belt width. CAD: 0 / 28.778 / 8
+  const GEOM0 = { uBot: 0, uTop: 28.778, W: 8 };
+  function normGeom(g) { g = Object.assign({}, GEOM0, g || {}); g.W = Math.min(20, Math.max(4, +g.W)); g.uBot = +g.uBot; g.uTop = Math.max(g.uBot + 12, +g.uTop); return g; }
+  // everything in front of the back plate beyond the belt face moves out with the width (same map the renderer uses)
+  const vShift = W => 8.2 * (W / 8 - 1);
+  function glassBoxes(g) {
+    g = normGeom(g); const dv = vShift(g.W), u0 = -12 + Math.min(0, g.uBot), u1 = 33 + Math.max(0, g.uTop - GEOM0.uTop);
+    return [{ x0: -9, x1: 32, u0, u1, v0: 10.8 + dv, v1: 12.0 + dv }, { x0: 7.4, x1: 15.6, u0, u1, v0: g.W + 0.4, v1: 10.8 + dv }];
+  }
+  // container + back plate follow the belt layout: stretched along the incline between the idlers (so their walls keep
+  // spanning the belts), everything beyond the top idler moves with it, and in depth everything in front of the belt
+  // face moves out with the width. Rigid parts (idlers) translate instead; the cams/gears stay where the CAD has them.
+  function shellMap(geom) {
+    const g = normGeom(geom), dB = g.uBot - GEOM0.uBot, dT = g.uTop - GEOM0.uTop, sc = g.W / 8, sh = vShift(g.W);
+    return (x, u, v) => [x, u <= 0 ? u + dB : u >= GEOM0.uTop ? u + dT : u + dB + (dT - dB) * u / GEOM0.uTop, v <= 0 ? v : v <= 8.2 ? v * sc : v + sh];
+  }
+  function isDefaultGeom(geom) { const g = normGeom(geom); return g.uBot === GEOM0.uBot && g.uTop === GEOM0.uTop && g.W === GEOM0.W; }
+  function xformShell(v0, cad, geom) {      // world-mm vertex array -> new array
+    if (isDefaultGeom(geom)) return v0;
+    const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, map = shellMap(geom), v = new Float32Array(v0.length);
+    for (let i = 0; i < v0.length; i += 3) {
+      const d0 = v0[i] - O[0], d1 = v0[i + 1] - O[1], d2 = v0[i + 2] - O[2];
+      const m = map(d0 * ex[0] + d1 * ex[1] + d2 * ex[2], d0 * eu[0] + d1 * eu[1] + d2 * eu[2], d0 * ev[0] + d1 * ev[1] + d2 * ev[2]);
+      for (let k = 0; k < 3; k++) v[i + k] = O[k] + m[0] * ex[k] + m[1] * eu[k] + m[2] * ev[k];
+    }
+    return v;
+  }
+  function glassMesh(cad, geom) {
+    const F = cad.frame, v = [], t = [], boxes = glassBoxes(geom);
+    for (const g of boxes) { const b = v.length / 3;
       for (const x of [g.x0, g.x1]) for (const u of [g.u0, g.u1]) for (const w of [g.v0, g.v1])
         for (let a = 0; a < 3; a++) v.push(F.O[a] + x * F.ex[a] + u * F.eu[a] + w * F.ev[a]);
       // corners indexed (x,u,w) bits 4,2,1
       const q = (a, c, d, e) => t.push(b + a, b + c, b + d, b + a, b + d, b + e);
       q(0, 2, 6, 4); q(1, 5, 7, 3); q(0, 4, 5, 1); q(2, 3, 7, 6); q(0, 1, 3, 2); q(4, 6, 7, 5); }
-    return { v: new Float32Array(v), t: new Uint32Array(t), boxes: GLASS };
+    return { v: new Float32Array(v), t: new Uint32Array(t), boxes };
   }
 
   function createSim(cad, opts) {
     opts = opts || {};
     const P = Object.assign({}, DEFAULTS, opts.params || {});
     const F = cad.frame, O = F.O.map(v => v * 1e-3), EX = F.ex, EU = F.eu, EV = F.ev;
-    const Lc = 28.778e-3, Rb = 5e-3, W = 8e-3, XB = 22.99e-3;
-    const tables = buildBeltTables(cad.cam, Lc, Rb);
+    const geom = normGeom(opts.geom), U0 = geom.uBot * 1e-3, Lc = (geom.uTop - geom.uBot) * 1e-3, Rb = 5e-3, W = geom.W * 1e-3, XB = 22.99e-3;
+    // belt frame starts at the bottom idler: the cam (fixed in the CAD) sits at cu - uBot along the run
+    const tables = buildBeltTables(Object.assign({}, cad.cam, { cu: cad.cam.cu - geom.uBot }), Lc, Rb);
     const foam = foamFromPreset(opts.foam || 'PU open-cell', opts.shore);
-    const sim = { tex: opts.tex || null, P, cad, foam, t: 0, steps: 0, theta: 0, S: 0, tables, Lc, Rb, W, XB, O, EX, EU, EV, omegaCam: 0, thetaLoc: [0, 0] };
+    const sim = { tex: opts.tex || null, P, cad, foam, t: 0, steps: 0, theta: 0, S: 0, tables, Lc, Rb, W, XB, O, EX, EU, EV, U0, geom, hopFollow: opts.hopperFollow !== false, wearT: 0, omegaCam: 0, thetaLoc: [0, 0] };
 
     const stat = [];
     for (const p of cad.parts) if (p.role === 'hopper' || p.role === 'plate') {
       let v = p.vArr, t = p.tArr;
       if (!v) { const vb = b64bytes(p.v), tb = b64bytes(p.t); v = new Float32Array(vb.buffer, vb.byteOffset, vb.byteLength / 4); t = new Uint32Array(tb.buffer, tb.byteOffset, tb.byteLength / 4); }
+      if (p.role === 'plate' || opts.hopperFollow !== false) v = xformShell(v, cad, geom);
       const tr = new Float64Array(t.length * 3);
       for (let i = 0; i < t.length; i++) { tr[i * 3] = v[t[i] * 3] * 1e-3; tr[i * 3 + 1] = v[t[i] * 3 + 1] * 1e-3; tr[i * 3 + 2] = v[t[i] * 3 + 2] * 1e-3; }
       stat.push(tr);
     }
-    if (opts.glass !== false) { const g = glassMesh(cad), tr = new Float64Array(g.t.length * 3);
+    if (opts.glass !== false) { const g = glassMesh(cad, geom), tr = new Float64Array(g.t.length * 3);
       for (let i = 0; i < g.t.length; i++) for (let a = 0; a < 3; a++) tr[i * 3 + a] = g.v[g.t[i] * 3 + a] * 1e-3;
       stat.push(tr); }
     const all = new Float64Array(stat.reduce((a, b) => a + b.length, 0)); let o = 0; for (const s of stat) { all.set(s, o); o += s.length; }
@@ -493,7 +542,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     sim.setPillSpec(opts.pill || {});
     sim.bodies = newBodies();
     sim.reset = function (clearFoam) { sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; if (clearFoam) sim.resetFoam(); };
-    sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); } };
+    sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); } sim.wearT = 0; };
     sim.addPills = function (n, region) { return addPills(sim, n, region); };
     sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) stepOnce(sim); };
     sim.beltSpeed = () => P.rpm * TAU / 60 * P.driveRadius;
@@ -514,6 +563,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 
   function addPills(sim, n, region) {
     const B = sim.bodies, T = sim.pillType, R = sim.rand;
+    if (!region && !sim.cad.spawn && sim.hopFollow && !isDefaultGeom(sim.geom)) {   // built-in drop zone rides with the container
+      const g = sim.geom, dT = (g.uTop - GEOM0.uTop) * 1e-3, sh = vShift(g.W) * 1e-3, D = [0, 1, 2].map(k => dT * sim.EU[k] + sh * sim.EV[k]);
+      region = { x: [6e-3 + D[0], 39e-3 + D[0]], y: [40e-3 + D[1], 64e-3 + D[1]], z: [118e-3 + D[2], 400e-3 + D[2]] };
+    }
     region = region || sim.cad.spawn || { x: [6e-3, 39e-3], y: [40e-3, 64e-3], z: [118e-3, 400e-3] };
     const d = T.brad * 2.1 + 0.4e-3;
     if (region.segs) return addPillsInSection(sim, n, region, d);
@@ -605,7 +658,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const sgn = belt === 0 ? 1 : -1, xc = belt === 0 ? 0 : sim.XB;
     const dx = sx - sim.O[0], dy = sy - sim.O[1], dz = sz - sim.O[2];
     const x = dx * sim.EX[0] + dy * sim.EX[1] + dz * sim.EX[2];
-    const u = dx * sim.EU[0] + dy * sim.EU[1] + dz * sim.EU[2];
+    const u = dx * sim.EU[0] + dy * sim.EU[1] + dz * sim.EU[2] - sim.U0;
     const v = dx * sim.EV[0] + dy * sim.EV[1] + dz * sim.EV[2];
     const xl = sgn * (x - xc), TX = sim.tex && sim.tex.active ? sim.tex : null, hmax = TX ? TX.hmax : 0;
     if (v < -rs || v > sim.W + rs || u < -(Rb + h + hmax + rs + 2e-3) || u > Lc + Rb + h + hmax + rs + 2e-3 || Math.abs(xl) > Rb + h + hmax + 2.5e-3 + rs) return false;
@@ -679,7 +732,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const vtx = vrx - vn * nx, vty = vry - vn * ny, vtz = vrz - vn * nz;
     let Fn = 0, Fv = 0, epsAcc = 0, nAct = 0, Gq = 0, Gv = 0, Gw = 0, a2 = 0;
     let SX = 0, SU = 0, AXx = 0, AXy = 0, AXz = 0, AUx = 0, AUy = 0, AUz = 0;   // patch-normal force sums (belt frame) + their moments
-    const dvc = sim.W / cl.nv;
+    const dvc = sim.W / cl.nv, cellA = cl.dq * dvc, wearX = P.wearX > 0 ? P.wearX : 1;
     // one foam "spring" per surface patch: local compression -> stress (with hysteresis/viscosity) x patch area
     const patch = (dloc, qq, vv, dA, hT) => {
       qq = ((qq % cl.perim) + cl.perim) % cl.perim; let iq = Math.floor(qq / cl.dq); if (iq >= cl.nq) iq = cl.nq - 1; let iv = Math.floor(vv / dvc); if (iv < 0) iv = 0; if (iv >= cl.nv) iv = cl.nv - 1;
@@ -691,7 +744,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       Fv += f.E * f.tauV * edot * dA;
       const dF = sgm * dA + (stop > 0 ? P.contactFreq * P.contactFreq * T.mass * stop * dA / Math.max(T.surfArea * 0.25, dA) : 0);
       Fn += dF; epsAcc += e * dA; nAct += dA; a2 += dA / PI;
-      if (e > 0.02) { const dp = (f.kc * Math.max(0, e - f.epsY) + f.ks * e) * dt; if (dp > 0 && ep < f.fpermMax) { ci[c] += f.fperm * dp; cv[c] += (1 - f.fperm) * dp; } tch[c] = 1; const dd = dEff / h; if (dd > dentArr[c]) dentArr[c] = dd; }
+      if (e > 0.02) {
+        const wA = dA < cellA ? dA / cellA : 1;   // share of this 1 mm cell the patch covers (no double counting)
+        if (ep < f.fpermMax) { cv[c] += (f.kc * Math.max(0, e - f.epsY) + f.ks * e) * dt * wA; ci[c] += (f.cset > 0 ? f.cset : 0) / CSET_T * (e / 0.5) * (e / 0.5) * wearX * dt * wA; }
+        tch[c] = 1; const dd = dEff / h; if (dd > dentArr[c]) dentArr[c] = dd; }
       return dF;
     };
     if (PT) {
@@ -913,19 +969,19 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       const u = dx * sim.EU[0] + dy * sim.EU[1] + dz * sim.EU[2], v = dx * sim.EV[0] + dy * sim.EV[1] + dz * sim.EV[2], x = dx * sim.EX[0] + dy * sim.EX[1] + dz * sim.EX[2];
       if (!B.crossed) B.crossed = new Uint8Array(B.cap);
       if (!B.crossed[i] && u < -12e-3) { B.crossed[i] = 1; (sim.stats.crossLog || (sim.stats.crossLog = [])).push([sim.t, x * 1e3, v * 1e3, u * 1e3]); }
-      if (B.exitT[i] < 0 && u < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 && v < sim.W + 3e-3) {
+      if (B.exitT[i] < 0 && u - sim.U0 < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 && v < sim.W + 3e-3) {
         B.exitT[i] = sim.t; sim.stats.exits.push({ t: sim.t, id: B.id[i], x }); sim.stats.dispensed++;
       }
       if (B.pz[i] < 0.0 || B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } }
     }
-    sim.t += dt; sim.steps++;
+    sim.t += dt; sim.steps++; sim.wearT += dt;
     if ((sim.steps & 15) === 0) {
       const f = sim.foam, cl = sim.cells, dtr = dt * 16, kr = Math.exp(-dtr / f.tauRec), kd = Math.exp(-dtr / 0.05);
       for (let b = 0; b < 2; b++) { const cv = cl.vis[b], tc = cl.touched[b], dn = cl.dent[b]; for (let c = 0; c < cv.length; c++) { if (!tc[c]) cv[c] *= kr; else tc[c] = 0; dn[c] *= kd; } }
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, glassMesh, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, glassMesh, glassBoxes, xformShell, shellMap, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -940,11 +996,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     foamName: 'PU open-cell', shore: 50, thick: 4.0, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
     count: 40, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
+    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
   };
   let sim = null, pending = null;
 
+  function simGeom() { return { uBot: S.geom.bot, uTop: FFx.GEOM0.uTop + S.geom.top, W: S.geom.W }; }
   function newSim() {
-    sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: S.glass, params: { rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode } });
+    if (typeof TEX !== 'undefined') TEX.W = S.geom.W * 1e-3;
+    sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: S.glass, geom: simGeom(), hopperFollow: S.hopFollow, params: { rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
     applyParams();
     sim.addPills(S.count);
     buildPillMesh();
@@ -954,7 +1013,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (!sim) return;
     if (typeof TEX !== 'undefined' && sim.cells) applyTex();
     applyVib();
-    sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180;
+    sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1;
   }
   function applyFoam() { // keep wear state, replace material
     const keep = sim.foam; const f = FFx.foamFromPreset(S.foamName, S.shore);
@@ -1023,8 +1082,37 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   const ROLECOL = { hopper: [0.55, 0.7, 0.95], plate: [0.62, 0.64, 0.68], cam: [0.95, 0.82, 0.45], worm: [0.85, 0.65, 0.2], motor: [0.28, 0.3, 0.34], static: [0.6, 0.62, 0.66] };
   const F = CAD.frame; const OM = F.O, EX = F.ex, EU = F.eu, EV = F.ev;
   const wpt = (x, u, v) => [OM[0] + x * EX[0] + u * EU[0] + v * EV[0], OM[1] + x * EX[1] + u * EU[1] + v * EV[1], OM[2] + x * EX[2] + u * EU[2] + v * EV[2]];
-  const parts = CAD.parts.map(p => ({ role: p.role, rot: p.rot, mesh: mkMesh(b64(p.v, Float32Array), b64(p.t, Uint32Array), null, null, false), id: p.id }));
-  const glassG = FFx.glassMesh(CAD), glassMeshGL = mkMesh(glassG.v, glassG.t, null, null, false);
+  // idler assemblies (bearing stacks + shafts + washers) at the four pulley centres, frame-local mm
+  const IDLERS = [[0, 0, 'bot', 0], [22.99, 0, 'bot', 1], [0, 28.778, 'top', 0], [22.99, 28.778, 'top', 1]];
+  const toLoc = (X, Y, Z) => { const d = [X - OM[0], Y - OM[1], Z - OM[2]]; return [d[0] * EX[0] + d[1] * EX[1] + d[2] * EX[2], d[0] * EU[0] + d[1] * EU[1] + d[2] * EU[2], d[0] * EV[0] + d[1] * EV[1] + d[2] * EV[2]]; };
+  function partInfo(p, v) {   // classify once: which idler it belongs to, and whether it is an outer race or a ball
+    if (p._info) return p._info;
+    let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < v.length; i += 3) { const l = toLoc(v[i], v[i + 1], v[i + 2]); for (let k = 0; k < 3; k++) { if (l[k] < mn[k]) mn[k] = l[k]; if (l[k] > mx[k]) mx[k] = l[k]; } }
+    const cx = (mn[0] + mx[0]) / 2, cu = (mn[1] + mx[1]) / 2, info = { idler: -1, kind: null };
+    if (p.role === 'static' && !p.rot && mx[2] > 1) IDLERS.forEach((I, k) => { if (Math.abs(cx - I[0]) < 6 && Math.abs(cu - I[1]) < 6) info.idler = k; });
+    if (info.idler >= 0) {
+      const I = IDLERS[info.idler], ex_ = mx[0] - mn[0], eu_ = mx[1] - mn[1], rc = Math.hypot(cx - I[0], cu - I[1]);
+      if (ex_ > 9.5 && ex_ < 10.5 && eu_ > 9.5 && eu_ < 10.5 && mx[2] - mn[2] < 4.5) info.kind = 'race';       // 10 mm OD outer race
+      else if (ex_ < 3 && eu_ < 3 && rc > 2.4 && rc < 3.6) info.kind = 'ball';                                // 2.6 mm balls on a 3 mm pitch radius
+    }
+    return (p._info = info);
+  }
+  const geomKey = () => [S.geom.bot, S.geom.top, S.geom.W, S.hopFollow].join('|');
+  function xformVerts(p, v0) {
+    const g = S.geom, info = partInfo(p, v0); if (!g.bot && !g.top && g.W === 8) return v0;
+    if (p.role === 'plate' || p.role === 'hopper') return p.role === 'hopper' && !S.hopFollow ? v0 : FFx.xformShell(v0, CAD, simGeom());
+    const v = new Float32Array(v0.length), du = info.idler < 0 ? 0 : (IDLERS[info.idler][2] === 'bot' ? g.bot : g.top), sc = g.W / 8, sh = FFx.vShift(g.W);
+    for (let i = 0; i < v0.length; i += 3) {
+      const l = toLoc(v0[i], v0[i + 1], v0[i + 2]); let w = l[2];
+      if (w > 0) w = w <= 8.2 ? w * sc : w + sh;
+      const W_ = wpt(l[0], l[1] + du, w); v[i] = W_[0]; v[i + 1] = W_[1]; v[i + 2] = W_[2];
+    }
+    return v;
+  }
+  const parts = [];
+  let glassMeshGL = null;
+  function rebuildGlass() { const g = FFx.glassMesh(CAD, simGeom()); glassMeshGL = mkMesh(g.v, g.t, null, null, false); }
   const pivA = wpt(CAD.cam.cx, CAD.cam.cu, 4), pivB = wpt(CAD.cam.cxB, CAD.cam.cuB, 4);
   const wormP = wpt(CAD.worm.c[0], CAD.worm.c[1], CAD.worm.c[2]);
 
@@ -1067,7 +1155,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const m = mkMesh(pos, new Uint32Array(idx), null, col, true); m.pos = pos; m.col = col; return m; });
   function beltFrame(belt, sig, side) { return null; }
   function updateBelts() {
-    const P = sim.P, h = P.thickness * 1e3, Rb = 5, Lc = sim.Lc * 1e3, W = 8, tb = sim.tables, cl = sim.cells, Rmid = 5 + 2;
+    const P = sim.P, h = P.thickness * 1e3, Rb = 5, Lc = sim.Lc * 1e3, W = sim.W * 1e3, U0 = sim.U0 * 1e3, tb = sim.tables, cl = sim.cells, Rmid = 5 + 2;
     const per = 2 * Lc + TAU * Rmid;
     for (let b = 0; b < 2; b++) {
       const sgn = b === 0 ? 1 : -1, xc = b === 0 ? 0 : sim.XB * 1e3, M = beltMesh[b], th = sim.thetaLoc[b];
@@ -1075,7 +1163,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       const back = (u, arr) => { const fi = Math.min(Math.max(u, 0), Lc) / 0.25, i0 = Math.min(Math.floor(fi), tb.nu - 2), ff = fi - i0;
         const a = arr[j0 * tb.nu + i0] * (1 - ff) + arr[j0 * tb.nu + i0 + 1] * ff, c = arr[j1 * tb.nu + i0] * (1 - ff) + arr[j1 * tb.nu + i0 + 1] * ff; return (Rb + ((a * (1 - fr) + c * fr) * 1e3 - Rb) * P.camBump); };
       const S0 = sim.S * 1e3;
-      const put = (arr, o, xl, u, v) => { const x = xc + sgn * xl; arr[o] = OM[0] + x * EX[0] + u * EU[0] + v * EV[0]; arr[o + 1] = OM[1] + x * EX[1] + u * EU[1] + v * EV[1]; arr[o + 2] = OM[2] + x * EX[2] + u * EU[2] + v * EV[2]; };
+      const put = (arr, o, xl, u, v) => { const x = xc + sgn * xl; u += U0; arr[o] = OM[0] + x * EX[0] + u * EU[0] + v * EV[0]; arr[o + 1] = OM[1] + x * EX[1] + u * EU[1] + v * EV[1]; arr[o + 2] = OM[2] + x * EX[2] + u * EU[2] + v * EV[2]; };
       for (let i = 0; i < NS; i++) {
         const sg = (i + 0.5) / NS * per; let xl, u, nxl, nu, R;
         if (sg < Lc) { u = Lc - sg; R = back(u, tb.Bp) + h; xl = R; nxl = 1; nu = 0; }
@@ -1145,7 +1233,12 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     // EV, B -theta) the RH worm must turn -20*theta about +EU. The wheels follow the shaft angle (no cam-B phase offset:
     // that offset is how the lobe is clocked on its shaft, the gear stays meshed with the worm).
     const MGB = m4.axisAngleAbout(EV, -sim.theta, pivB);
-    for (const p of parts) { if (p.role === 'hopper') continue; const M = p.rot === 'camA' || p.rot === 'gearA' ? MA : p.rot === 'camB' ? MB : p.rot === 'gearB' ? MGB : p.role === 'worm' ? MW : I; draw(p.mesh, M, ROLECOL[p.role] || ROLECOL.static, 1, true); }
+    // idler bearings: the outer race turns with the belt's inner face (no slip, belt travel S over the 5 mm race radius);
+    // the balls orbit with the cage at r_outer_contact / (2 r_pitch) = 4.3 / 6 of the race speed; inner race sits on the axle
+    const MR = [], MBl = [];
+    for (let k = 0; k < 4; k++) { const Id = IDLERS[k], c = wpt(Id[0], Id[1] + (Id[2] === 'bot' ? S.geom.bot : S.geom.top), 0), a = (Id[3] === 0 ? -1 : 1) * sim.S * 1e3 / 5;
+      MR.push(m4.axisAngleAbout(EV, a, c)); MBl.push(m4.axisAngleAbout(EV, a * 4.3 / 6, c)); }
+    for (const p of parts) { if (p.role === 'hopper') continue; const M = p.kind === 'race' ? MR[p.idler] : p.kind === 'ball' ? MBl[p.idler] : p.rot === 'camA' || p.rot === 'gearA' ? MA : p.rot === 'camB' ? MB : p.rot === 'gearB' ? MGB : p.role === 'worm' ? MW : I; draw(p.mesh, M, ROLECOL[p.role] || ROLECOL.static, 1, true); }
     updateBelts(); draw(beltMesh[0], I, [1, 1, 1], 1, true); draw(beltMesh[1], I, [1, 1, 1], 1, true);
     // pills
     const B = sim.bodies;
@@ -1187,22 +1280,30 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const bw = (W2 - 8) / 40; iv.forEach((v, i) => { g2.fillStyle = v < 0.08 ? '#f55' : '#5c9'; const hh = v / mx * (H2 - 24); g2.fillRect(4 + i * bw, H2 - 4 - hh, bw - 1, hh); });
     // wear map
     const c3 = $('cWear'), g3 = c3.getContext('2d'), cl = sim.cells; const img = g3.createImageData(cl.nq, cl.nv * 2 + 1);
-    for (let b = 0; b < 2; b++) for (let v = 0; v < cl.nv; v++) for (let q = 0; q < cl.nq; q++) { const s = Math.min(1, (cl.perm[b][q * cl.nv + v] + cl.vis[b][q * cl.nv + v]) * 3.5), o = ((b * (cl.nv + 1) + v) * cl.nq + q) * 4;
-      img.data[o] = 30 + 225 * s; img.data[o + 1] = 40 + 120 * s; img.data[o + 2] = 60 - 30 * s; img.data[o + 3] = 255; }
+    let pm = 0; for (let b = 0; b < 2; b++) for (let c = 0; c < cl.perm[b].length; c++) if (cl.perm[b][c] > pm) pm = cl.perm[b][c];
+    for (let b = 0; b < 2; b++) for (let v = 0; v < cl.nv; v++) for (let q = 0; q < cl.nq; q++) { const c = q * cl.nv + v, pr = pm > 0 ? cl.perm[b][c] / pm : 0, dn = Math.min(1, cl.vis[b][c] * 5), o = ((b * (cl.nv + 1) + v) * cl.nq + q) * 4;
+      img.data[o] = 30 + 90 * dn + 135 * pr; img.data[o + 1] = 40 + 90 * dn - 20 * pr; img.data[o + 2] = 60 + 80 * dn - 40 * pr; img.data[o + 3] = 255; }
     const tmp = document.createElement('canvas'); tmp.width = cl.nq; tmp.height = cl.nv * 2 + 1; tmp.getContext('2d').putImageData(img, 0, 0);
     g3.imageSmoothingEnabled = false; g3.clearRect(0, 0, c3.width, c3.height); g3.drawImage(tmp, 0, 0, c3.width, c3.height);
   }
   let lastUI = 0, rtf = 0, wallPrev = performance.now(), simPrev = 0;
+  const h_mm = () => sim.P.thickness * 1e3;
   function updateReadouts() {
     const st = stats.compute(), f = sim.foam, P = sim.P, gap = sim.nipGap(), cl = sim.cells;
-    let sumS = 0, maxS = 0, cnt = 0; for (let b = 0; b < 2; b++) for (let c = 0; c < cl.perm[b].length; c++) { const s = cl.perm[b][c] + cl.vis[b][c]; sumS += s; cnt++; if (s > maxS) maxS = s; }
+    let sumP = 0, maxP = 0, maxD = 0, cnt = 0; for (let b = 0; b < 2; b++) for (let c = 0; c < cl.perm[b].length; c++) { const p = cl.perm[b][c], d = cl.vis[b][c]; sumP += p; cnt++; if (p > maxP) maxP = p; if (d > maxD) maxD = d; }
     const nC = Math.max(1, sim.stats.contacts), Pw = sim.stats.powerAcc, om = Math.abs(sim.omegaCam) || 1;
     $('r_disp').textContent = st.total; $('r_rate').textContent = fmt(st.rate, 1) + ' /min'; $('r_iv').textContent = st.mean ? `${fmt(st.mean, 2)} ± ${fmt(st.sd, 2)} s  (CV ${fmt(st.cv * 100, 0)}%)` : '—';
     $('r_dbl').textContent = st.doubles + ' (<80 ms apart)'; $('r_hop').textContent = st.inHopper; $('r_lost').textContent = sim.stats.lost;
     $('r_jam').textContent = st.inHopper > 0 && P.rpm !== 0 && st.sinceLast > 8 ? 'JAM? no pill for ' + fmt(st.sinceLast, 0) + ' s' : 'ok'; $('r_jam').style.color = st.sinceLast > 8 && st.inHopper > 0 ? '#f66' : '#7d9';
     $('r_belt').textContent = fmt(sim.beltSpeed() * 1e3, 1) + ' mm/s'; $('r_nip').textContent = `${fmt(gap.rest * 1e3, 2)} mm rest → ${fmt(gap.min * 1e3, 2)} mm at lobe peak` + (gap.min < 0 ? ' ⚠ foams would touch' : ''); $('r_nip').style.color = gap.min < 0 ? '#f96' : '';
     $('r_eps').textContent = `${fmt(sim.stats.contacts ? sim.stats.meanEps / nC * 100 : 0, 1)}% mean / ${fmt(sim.stats.maxEps * 100, 0)}% peak`;
-    $('r_set').textContent = `${fmt(sumS / cnt * 100, 2)}% mean / ${fmt(maxS * 100, 0)}% max of thickness`; $('r_trq').textContent = fmt(Pw / om * 1e3, 2) + ' mN·m (belt friction load)';
+    const pct = x => { x *= 100; return x === 0 ? '0' : x < 1e-3 ? x.toExponential(1) : x < 0.1 ? x.toPrecision(2) : fmt(x, 2); };
+    $('r_set').textContent = `${pct(maxP)}% worst spot · ${pct(sumP / cnt)}% mean (permanent, of ${fmt(h_mm(), 1)} mm)`;
+    $('r_dent').textContent = `${fmt(maxD * 100, 1)}% deepest (recovers in ~${fmt(f.tauRec * 3, 0)} s)`;
+    // service life: time at this duty until the worst spot loses 10 % of its thickness (a common foam end-of-life spec)
+    const used = sim.wearT * (P.wearX || 1), lifeS = maxP > 0 ? 0.10 / (maxP / Math.max(used, 1e-9)) * 1 : 0;
+    $('r_life').textContent = maxP >= 0.10 ? 'worn out (≥10% set)' : maxP > 0 ? `≈ ${lifeS > 86400 * 2 ? fmt(lifeS / 86400, 0) + ' days' : fmt(lifeS / 3600, 1) + ' h'} of this duty to 10% set` + (P.wearX > 1 ? ` · ${used > 86400 ? fmt(used / 86400, 1) + ' days' : fmt(used / 3600, 2) + ' h'} simulated` : '') : '—';
+    const fr = Math.min(1, maxP / 0.10); $('wearFill').style.width = (fr * 100).toFixed(1) + '%'; $('wearFill').style.background = fr < 0.5 ? '#7d9' : fr < 0.85 ? '#fc6' : '#f66'; $('r_trq').textContent = fmt(Pw / om * 1e3, 2) + ' mN·m (belt friction load)';
     $('r_t').textContent = fmt(sim.t, 1) + ' s'; $('r_rtf').textContent = fmt(rtf, 2) + '× real time'; $('r_sph').textContent = sim.nSpheres || 0;
     $('r_worm').textContent = fmt(Math.abs(P.rpm) * P.wormRatio, 0) + ' rpm worm (1:' + P.wormRatio + ')';
     drawCharts();
@@ -1241,23 +1342,38 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 
   function syncUI() {
     if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
+    S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
     $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; $('count').value = S.count;
     $('camPhase').value = S.camPhase;
     const sp = S.pill.shape; $('rowL').style.display = (sp === 'capsule' || sp === 'ellipsoid') ? '' : 'none'; $('rowT').style.display = (sp === 'tablet' || sp === 'ellipsoid') ? '' : 'none'; $('rowEdge').style.display = sp === 'tablet' ? '' : 'none';
     $('pWlab').textContent = sp === 'ellipsoid' ? 'Width (mm)' : (sp === 'tablet' || sp === 'sphere' ? 'Diameter (mm)' : 'Diameter (mm)');
     for (const el of document.querySelectorAll('input[type=range]')) { const o = $(el.id + 'V'); if (o) o.textContent = (+el.value).toString(); }
-    const f = sim ? sim.foam : null; if (f) { ['epsY', 'kc', 'fperm', 'tauRec', 'H', 'tauV', 'grip', 'adh', 'eps1', 'epsD'].forEach(k => { const e = $('a_' + k); if (e) { e.value = f[k]; const o = $('a_' + k + 'V'); if (o) o.textContent = (+f[k]).toString(); } }); }
+    const f = sim ? sim.foam : null; if (f) { ['epsY', 'kc', 'cset', 'tauRec', 'H', 'tauV', 'grip', 'adh', 'eps1', 'epsD'].forEach(k => { const e = $('a_' + k); if (e) { e.value = f[k]; const o = $('a_' + k + 'V'); if (o) o.textContent = (+f[k]).toString(); } }); }
   }
   function hook(id, fn, live) { $(id).addEventListener('input', () => { fn($(id).value); const o = $(id + 'V'); if (o) o.textContent = $(id).value; }); }
   hook('foamType', v => { S.foamName = v; S.shore = FFx.FOAMS[v].S; for (const k in adv) delete adv[k]; applyFoam(); syncUI(); });
   hook('shore', v => { S.shore = +v; for (const k of ['E']) delete adv[k]; applyFoam(); });
-  hook('thick', v => { S.thick = +v; applyParams(); });
+  hook('thick', v => { S.thick = +v; applyParams(); geoInfo(); });
+  function geoInfo() {
+    const Lc = FFx.GEOM0.uTop + S.geom.top - S.geom.bot, loop = 2 * Lc + TAU * (5 + S.thick / 2);
+    $('geoInfo').textContent = `idler centres ${fmt(Lc, 1)} mm apart · belt loop ${fmt(loop, 1)} mm (mid-foam) · ${fmt(S.geom.W, 1)} mm wide` + (S.geom.bot || S.geom.top || S.geom.W !== 8 ? ' · changed from CAD' : ' · CAD layout') + '. Changing these restarts the run with a fresh belt.';
+  }
+  function applyGeom() {
+    const hp = CAD.parts.find(p => p.id === 'user_hopper'); if (hp) CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(hp.vArr, CAD, simGeom()) : hp.vArr, hp.tArr);
+    rebuildGLParts(); rebuildGlass(); newSim(); applyTex(); geoInfo(); }
+  $('hopFollow').onchange = () => { S.hopFollow = $('hopFollow').checked; applyGeom(); };
+  for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) {
+    $(id).addEventListener('input', () => { S.geom[k] = +$(id).value; $(id + 'V').textContent = $(id).value; geoInfo(); });
+    $(id).addEventListener('change', () => { S.geom[k] = +$(id).value; applyGeom(); });
+  }
+  $('geoReset').onclick = () => { S.geom = { bot: 0, top: 0, W: 8 }; syncUI(); applyGeom(); };
+  $('wearX').onchange = () => { S.wearX = +$('wearX').value; sim.P.wearX = S.wearX; };
   hook('rpm', v => { S.rpm = +v; applyParams(); });
   hook('grav', v => { S.g = +v; applyParams(); });
   hook('speed', v => { S.speed = +v; });
   hook('camPhase', v => { S.camPhase = +v; applyParams(); });
-  for (const k of ['epsY', 'kc', 'fperm', 'tauRec', 'H', 'tauV', 'grip', 'adh', 'eps1', 'epsD']) hook('a_' + k, v => { adv[k] = +v; sim.foam[k] = +v; });
+  for (const k of ['epsY', 'kc', 'cset', 'tauRec', 'H', 'tauV', 'grip', 'adh', 'eps1', 'epsD']) hook('a_' + k, v => { adv[k] = +v; sim.foam[k] = +v; });
   // pill geometry: rebuild (debounced); friction: live
   // Keep each shape's proportions real: switching shape carries W/L/T over from the previous shape, and a capsule or
   // softgel whose length equals its width is just a sphere (that was the bug: tablet sets L = W, then "capsule" kept it).
@@ -1278,7 +1394,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   const live = (k) => v => { S.pill[k] = +v; sim.pillType.spec[k] = +v; for (let i = 0; i < sim.bodies.n; i++) sim.bodies.type[i].spec[k] = +v; };
   hook('pMuF', live('muFoam')); hook('pMuH', live('muHard')); hook('pRest', live('rest'));
   hook('count', v => { S.count = +v; });
-  function rebuildPills() { const wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) }; const th = sim.theta, Sx = sim.S; newSim(); applyFoam(); sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i])); sim.theta = th; sim.S = Sx; }
+  function rebuildPills() { const wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) }; const th = sim.theta, Sx = sim.S, wT = sim.wearT; newSim(); applyFoam(); sim.wearT = wT; sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i])); sim.theta = th; sim.S = Sx; }
   $('pillPreset').addEventListener('change', e => { const p = PILLS[e.target.value]; if (!p) return; Object.assign(S.pill, { L: p.W, T: p.W, edge: 0.8 }, p); if (p.shape === 'tablet') S.pill.L = p.W; syncUI(); later(rebuildPills, 50); e.target.value = ''; });
   $('btnFill').onclick = () => { sim.addPills(S.count); };
   $('btnClear').onclick = () => { sim.reset(false); };
@@ -1292,7 +1408,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   $('dtSel').onchange = e => { S.dtMode = +e.target.value; applyParams(); };
   $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dispense_log.csv'; a.click(); };
   $('btnSave').onclick = () => { const o = { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null }; const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); };
-  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); Object.assign(S, o.S); Object.assign(adv, o.adv || {});
+  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {}); if (o.S && o.S.geom) { rebuildGLParts(); rebuildGlass(); }
     if (o.texture) { TEX.cells.set(o.texture.cells); TEX.ridge = o.texture.ridge; TEX.groove = o.texture.groove; TEX.len = o.texture.len; for (const [id, k] of [['texRidge', 'ridge'], ['texGroove', 'groove'], ['texLen', 'len']]) { $(id).value = TEX[k]; $(id + 'V').textContent = TEX[k]; } }
     if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); rebuildGLParts(); $('camInfo').textContent = 'Cam profile from setup file.'; }
     newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); };
@@ -1368,18 +1484,24 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 
   /* ================================================================ geometry upload */
   const ORIG = { parts: CAD.parts.slice(), cam: JSON.parse(JSON.stringify(CAD.cam)) };
-  const meshCache = new Map(parts.map((p, k) => [CAD.parts[k], p.mesh]));
+  const meshCache = new Map();   // part -> { key, mesh } (rebuilt when the belt layout changes)
   let camGen = null;                                  // generated meshes for an uploaded cam profile
   function rebuildGLParts() {
-    parts.length = 0;
+    parts.length = 0; const key = geomKey();
     for (const p of CAD.parts) {
       if (CAD.cam.custom && p.role === 'cam') continue;
-      let mesh = meshCache.get(p);
-      if (!mesh) { mesh = p.vArr ? mkMesh(p.vArr, p.tArr, null, null, false) : mkMesh(b64(p.v, Float32Array), b64(p.t, Uint32Array), null, null, false); meshCache.set(p, mesh); }
-      parts.push({ role: p.role, rot: p.rot, mesh, id: p.id });
+      let c = meshCache.get(p);
+      if (!c || c.key !== key) {
+        const v0 = p.vArr || (p._v0 || (p._v0 = b64(p.v, Float32Array))), t0 = p.tArr || (p._t0 || (p._t0 = b64(p.t, Uint32Array)));
+        if (c && c.mesh) { for (const b of [c.mesh.pb, c.mesh.nb, c.mesh.cb, c.mesh.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(c.mesh.vao); }
+        c = { key, mesh: mkMesh(xformVerts(p, v0), t0, null, null, false) }; meshCache.set(p, c);
+      }
+      const info = p._info || { idler: -1, kind: null };
+      parts.push({ role: p.role, rot: p.rot, mesh: c.mesh, id: p.id, idler: info.idler, kind: info.kind });
     }
     if (CAD.cam.custom && camGen) for (const g of camGen) parts.push(g);
   }
+  rebuildGLParts(); rebuildGlass();
   function parseSTL(buf) {
     const dv = new DataView(buf), n = buf.byteLength >= 84 ? dv.getUint32(80, true) : 0;
     if (n > 0 && 84 + n * 50 === buf.byteLength) {
@@ -1425,7 +1547,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const dx = +$('hopDx').value || 0, dy = +$('hopDy').value || 0, dz = +$('hopDz').value || 0, v = new Float32Array(hopRaw.v);
     for (let i = 0; i < v.length; i += 3) { v[i] += dx; v[i + 1] += dy; v[i + 2] += dz; }
     CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat([{ id: 'user_hopper', role: 'hopper', rot: null, vArr: v, tArr: hopRaw.t }]);
-    CAD.spawn = spawnFrom(v, hopRaw.t);
+    CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(v, CAD, simGeom()) : v, hopRaw.t);
     let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9]; for (let i = 0; i < v.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], v[i + a]); mx[a] = Math.max(mx[a], v[i + a]); }
     const nt = hopRaw.t.length / 3, size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
     const lo = toLocal(...mn), hi = toLocal(...mx);
