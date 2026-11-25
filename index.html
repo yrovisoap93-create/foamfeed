@@ -9,7 +9,7 @@ h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#7fb2ff;ma
 .row{display:grid;grid-template-columns:118px 1fr 62px;gap:5px;align-items:center;margin:2px 0}.row label{color:#aab4c4}.row input[type=range]{width:100%;margin:0}.row .v{text-align:right;color:#e8eefc;font-variant-numeric:tabular-nums}
 select,button{background:#232a36;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:4px 7px;font:inherit}select{width:100%}button{cursor:pointer}button:hover{background:#2d3646}
 .btns{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0}.btns button{flex:1 1 auto}button.pri{background:#1f4f9c;border-color:#3b79d6}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:2px 0}.kv b{color:#8c98ab;font-weight:500}.kv span{text-align:right;color:#eaf0ff;font-variant-numeric:tabular-nums}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:2px 0}.kv b{color:#8c98ab;font-weight:500}.kv span{text-align:right;color:#eaf0ff;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
 canvas.ch{width:100%;background:#0f1217;border:1px solid #2a303b;border-radius:4px;display:block;margin:3px 0}
 details{margin:4px 0}summary{cursor:pointer;color:#9fb6d8}small,.note{color:#7e8a9c;font-size:11px}
 #help{position:fixed;inset:0;background:#000c;z-index:50;display:flex;align-items:center;justify-content:center}#help.hide{display:none}#help div{max-width:760px;background:#171b22;border:1px solid #38414f;border-radius:8px;padding:20px 26px;max-height:88vh;overflow:auto}#help h3{margin:.2em 0 .5em;color:#7fb2ff}#help li{margin:3px 0}
@@ -2022,9 +2022,10 @@ body.nonotes aside small{display:none}
     const fs = FFx.feedStats(sim), f = C.feeds[C.feeds.length - 1];
     // multi-pill feeds: show each pill as it is counted, the time since the last one, and what that is on screen when the
     // sim runs slower than real time (a 1 s gap at 0.05x takes 20 s to watch, which looks like the feed has stopped)
-    const dots = f => '●'.repeat(Math.min(f.n, f.need)) + '○'.repeat(Math.max(0, f.need - f.n)) + (f.n > f.need ? ' +' + (f.n - f.need) : '');
+    // one dot per pill up to 10; bigger calls get a compact percentage so the line never runs off the panel
+    const dots = f => f.need > 10 ? `[${Math.round(100 * Math.min(f.n, f.need) / f.need)}%]` + (f.n > f.need ? ' +' + (f.n - f.need) : '') : '●'.repeat(Math.min(f.n, f.need)) + '○'.repeat(Math.max(0, f.need - f.n)) + (f.n > f.need ? ' +' + (f.n - f.need) : '');
     const slow = () => { const r = window.__rtf; return r > 0 && r < 0.5 ? ` (≈${fmt((sim.t - f.tLast) / r, 0)} s on screen at ${fmt(r, 2)}× speed)` : ''; };
-    const gaps = f => f.times.length > 1 ? ' · gaps ' + f.times.slice(1).map((t, k) => fmt(t - f.times[k], 2)).join(' / ') + ' s' : '';
+    const gaps = f => { if (f.times.length < 2) return ''; const g = f.times.slice(1).map((t, k) => t - f.times[k]); return g.length <= 6 ? ' · gaps ' + g.map(x => fmt(x, 2)).join(' / ') + ' s' : ` · gaps avg ${fmt(g.reduce((a, b) => a + b, 0) / g.length, 2)} s, max ${fmt(Math.max(...g), 2)} s`; };
     if (f && f.need > 1 && f.tDet < 0 && !f.timeout && !f.aborted) {
       $('r_feed').textContent = `${dots(f)}  ${f.n} of ${f.need} out · waiting for pill ${f.n + 1} · ${fmt(sim.t - f.tLast, 1)} s ${f.n ? 'since pill ' + f.n : 'since start'}${slow()}`;
       $('r_feed').style.color = '#7cf';
