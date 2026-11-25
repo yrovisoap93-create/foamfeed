@@ -598,7 +598,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, V = [], T = [];
     const W = (x, u, v) => [O[0] + x * ex[0] + u * eu[0] + v * ev[0], O[1] + x * ex[1] + u * eu[1] + v * ev[1], O[2] + x * ex[2] + u * eu[2] + v * ev[2]];
     const quad = (a, b, c, d) => { const i = V.length / 3; for (const p of [a, b, c, d]) V.push(...W(p[0], p[1], p[2])); T.push(i, i + 1, i + 2, i, i + 2, i + 3); };
-    const fp = frontProfile(t, builtin), vFront = u => { if (u > fp[fp.length - 1][0]) return builtin ? 90 : fp[fp.length - 1][1]; return Math.max(...[vAtProfile(fp, u)]); };
+    // side walls reach out to the front wall: the insert's own front wall, then (built-in container) its CAD front wall
+    const fp = frontProfile(t, builtin), vFront = u => { if (u > fp[fp.length - 1][0]) return builtin ? vAtProfile(FB_CAD, u) : fp[fp.length - 1][1]; return vAtProfile(fp, u); };
     const uMaxFront = fp[fp.length - 1][0];
     // front wall: extrude its (u,v) profile across x (CAD side wall to side wall)
     for (let i = 0; i + 1 < fp.length; i++) {
