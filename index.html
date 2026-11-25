@@ -88,6 +88,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="note" id="hopInfo"></div>
 <div class="row"><label title="DXF (lines, arcs, circles, polylines, splines), CSV/TXT points, or an STL/OBJ of the cam">Cam lobe</label><input type="file" id="geoCam" class="file" accept=".dxf,.csv,.txt,.stl,.obj" style="grid-column:2/4"></div>
 <div class="row"><label>CSV columns</label><select id="camFmt" style="grid-column:2/4"><option value="auto">auto-detect</option><option value="xy">x, y (mm)</option><option value="polar">angle (deg), radius (mm)</option></select></div>
+<div class="row"><label for="camShape" title="regular polygon cams with 1 mm rounded corners. Corner (peak) radius = the CAD lobe peak, so the nip closes to the same minimum gap; one corner starts where the CAD lobe does">Cam shape preset</label><select id="camShape" style="grid-column:2/4"><option value="">— pick a shape —</option><option value="3">Triangle (3 corners)</option><option value="4">Square (4)</option><option value="5">Pentagon (5)</option><option value="6">Hexagon (6)</option><option value="7">Heptagon (7)</option><option value="8">Octagon (8)</option></select></div>
 <div class="btns"><button id="camReset">Original cam</button></div>
 <div class="note" id="camInfo"></div>
 <details><summary>Cam file conventions</summary><small>2-D files (DXF / CSV): origin = cam shaft centre, units mm, +X points across the nip toward the other belt, +Y points up the incline toward the hopper; drawn as it sits at the start of a run. The belt wraps the cam taut, so only the outer (convex) envelope matters. The same profile drives both cams (cam B is the mirror image, as in the CAD). STL/OBJ cams are recognised either in assembly coordinates (sitting on cam A or B) or as a lone part with the shaft on its Z axis.</small></details>
@@ -1907,7 +1908,17 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     } catch (err) { $('camInfo').innerHTML = `<span class="warn">Could not use ${f.name}: ${err.message}</span>`; }
     e.target.value = '';
   };
-  $('camReset').onclick = () => { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; rebuildGLParts(); rebuildPills(); $('camInfo').textContent = 'Original CAD cam.'; };
+  $('camReset').onclick = () => { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; rebuildGLParts(); rebuildPills(); $('camInfo').textContent = 'Original CAD cam.'; $('camShape').value = ''; };
+  // regular-polygon cam presets: corners filleted (rc), corner radius = CAD lobe peak, first corner at the CAD lobe angle
+  function polygonCam(N, rc) {
+    const prof0 = ORIG.cam.profile, np = prof0.length; let im = 0; for (let i = 1; i < np; i++) if (prof0[i] > prof0[im]) im = i;
+    const R = prof0[im], a0 = -PI + (im + 0.5) * TAU / np, Rc = R - rc, pts = [];
+    for (let k = 0; k < N; k++) { const ak = a0 + k * TAU / N, vx = Rc * Math.cos(ak), vy = Rc * Math.sin(ak);
+      for (let j = 0; j <= 24; j++) { const a = ak - PI / N + j / 24 * TAU / N; pts.push([vx + rc * Math.cos(a), vy + rc * Math.sin(a)]); } }
+    return profileFrom(pts, 180);
+  }
+  const CAMNAMES = { 3: 'Triangle', 4: 'Square', 5: 'Pentagon', 6: 'Hexagon', 7: 'Heptagon', 8: 'Octagon' };
+  $('camShape').onchange = () => { const N = +$('camShape').value; if (!N) return; applyCamProfile(polygonCam(N, 1.0), `${CAMNAMES[N]} cam preset`); };
 
   /* ================================================================ vibration */
   function vibAxis(a) { return a === 'vert' ? [0, 0, 1] : a === 'across' ? EX.slice() : a === 'incline' ? EU.slice() : EV.slice(); }
