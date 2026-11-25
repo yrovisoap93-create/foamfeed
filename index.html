@@ -1595,11 +1595,19 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   $('camBump').onchange = e => { sim.P.camBump = e.target.checked ? 1 : 0; };
   $('dtSel').onchange = e => { S.dtMode = +e.target.value; applyParams(); };
   $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dispense_log.csv'; a.click(); };
-  $('btnSave').onclick = () => { const o = { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null }; const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); };
-  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {}); if (o.S && (o.S.geom || o.S.throat)) { rebuildGLParts(); rebuildGlass(); }
+  $('btnSave').onclick = () => { const o = { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null, hopper: hopRaw ? { name: hopRaw.name, v: b64enc(hopRaw.v), t: b64enc(hopRaw.t), offset: ['hopDx', 'hopDy', 'hopDz'].map(id => +$(id).value || 0) } : null }; const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); };
+  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {});
     if (o.texture) { TEX.cells.set(o.texture.cells); TEX.ridge = o.texture.ridge; TEX.groove = o.texture.groove; TEX.len = o.texture.len; for (const [id, k] of [['texRidge', 'ridge'], ['texGroove', 'groove'], ['texLen', 'len']]) { $(id).value = TEX[k]; $(id + 'V').textContent = TEX[k]; } }
-    if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); rebuildGLParts(); $('camInfo').textContent = 'Cam profile from setup file.'; }
+    if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); $('camInfo').textContent = 'Cam profile from setup file.'; }
+    else if (CAD.cam.custom) { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; $('camInfo').textContent = 'Original CAD cam.'; }
+    if (o.hopper && o.hopper.v) {
+      hopRaw = { v: b64(o.hopper.v, Float32Array), t: b64(o.hopper.t, Uint32Array), name: o.hopper.name || 'container (from setup)' };
+      ['hopDx', 'hopDy', 'hopDz'].forEach((id, k) => $(id).value = (o.hopper.offset || [0, 0, 0])[k]);
+      applyHopper(true);
+    } else if (hopRaw) { hopRaw = null; CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat(ORIG.parts.filter(p => p.role === 'hopper')); delete CAD.spawn; $('hopInfo').textContent = 'Original container.'; ['hopDx', 'hopDy', 'hopDz'].forEach(id => $(id).value = 0); }
+    applyTex(); rebuildGLParts(); rebuildGlass();   // texture first: a raised-idler slot is cut to clear the ridges
     newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); };
+  function b64enc(ta) { const u8 = new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength); let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(bin); }
   $('helpBtn').onclick = () => $('help').classList.toggle('hide');
   $('help').onclick = () => $('help').classList.add('hide');
 
@@ -1739,8 +1747,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (segs.length < 12) return null;
     return { segs: new Float64Array(segs), x: [xa * 1e-3, xb * 1e-3], y: [ya * 1e-3, yb * 1e-3], z: [zc * 1e-3, 0.4] };
   }
-  function applyHopper() {
-    if (!hopRaw) return;
+  function applyHopper(fromSetup) {
+    if (!hopRaw) return; const noRestart = fromSetup === true;   // (also called as an onchange handler with an Event)
     const dx = +$('hopDx').value || 0, dy = +$('hopDy').value || 0, dz = +$('hopDz').value || 0, v = new Float32Array(hopRaw.v);
     for (let i = 0; i < v.length; i += 3) { v[i] += dx; v[i + 1] += dy; v[i + 2] += dz; }
     CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat([{ id: 'user_hopper', role: 'hopper', rot: null, vArr: v, tArr: hopRaw.t }]);
@@ -1754,7 +1762,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (size > 400) msg += ' <span class="warn">Very large — wrong units? (expects mm)</span>';
     if (nt > 60000) msg += ' <span class="warn">High triangle count slows contact checks; decimate to under ~60k.</span>';
     if (!CAD.spawn) msg += ' <span class="warn">Could not find an opening half way up; pills drop from the default zone.</span>';
-    $('hopInfo').innerHTML = msg;
+    $('hopInfo').innerHTML = msg + (noRestart ? ' (from setup file)' : '');
+    if (noRestart) return;
     rebuildGLParts(); rebuildPills();
   }
   $('geoHop').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const m = await readMesh(f); hopRaw = { v: m.v, t: m.t, name: f.name }; applyHopper(); } catch (err) { $('hopInfo').innerHTML = `<span class="warn">Could not read ${f.name}: ${err.message}</span>`; } e.target.value = ''; };
