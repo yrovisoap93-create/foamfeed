@@ -211,6 +211,109 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (o.shape === 'capsule') { o.T = o.W; o.L = Math.max(o.L, o.W); }
     return o;
   }
+  /* ------------------------------------------------------------------ pill collision geometry
+     Pills collide as rigid clumps of spheres (walls, other pills) and press the foam with their TRUE surface.
+     - clump: built per shape so the union of spheres reproduces the real outline (capsule: row of spheres on the
+       axis; tablet: rim ring(s) + face rings; ellipsoid: set-cover from the medial plane). Typical shortfall
+       0.1-0.3 mm vs 0.6-2 mm for the old greedy fill (which made rims gear-like and capsules lumpy).
+     - surface: ~0.1 mm^2 area-weighted samples of the real surface, each assigned to the sphere whose surface is
+       nearest. The foam integrates stress over these patches (exact Winkler integration over the real shape, no
+       double counting where spheres overlap, flat faces load the foam like flat faces). */
+  function pillSurface(dep, hx, hy, hz, NS) {
+    const out = new Float64Array(NS * 7), ga = PI * (3 - Math.sqrt(5)), R = Math.max(hx, hy, hz) * 1.3, det = hx * hy * hz;
+    for (let i = 0; i < NS; i++) {
+      const zz = 1 - 2 * (i + 0.5) / NS, rr = Math.sqrt(Math.max(0, 1 - zz * zz)), ph = i * ga;
+      const ux = rr * Math.cos(ph), uy = rr * Math.sin(ph), uz = zz, ax = ux * hx, ay = uy * hy, az = uz * hz, m = Math.hypot(ax, ay, az);
+      const dx = ax / m, dy = ay / m, dz = az / m;
+      let lo = 0, hi = R; for (let k = 0; k < 44; k++) { const t = (lo + hi) / 2; if (dep(dx * t, dy * t, dz * t) >= 0) lo = t; else hi = t; }
+      const x = dx * lo, y = dy * lo, z = dz * lo, e = 1e-6;
+      let gx = dep(x - e, y, z) - dep(x + e, y, z), gy = dep(x, y - e, z) - dep(x, y + e, z), gz = dep(x, y, z - e) - dep(x, y, z + e); const gl = Math.hypot(gx, gy, gz) || 1;
+      gx /= gl; gy /= gl; gz /= gl;
+      // area element: solid angle of this direction sample (stretched-sphere Jacobian) * t^2 / cos(normal, ray)
+      const dOmega = (4 * PI / NS) * det / (m * m * m), cosn = Math.max(0.05, gx * dx + gy * dy + gz * dz);
+      out.set([x, y, z, gx, gy, gz, dOmega * lo * lo / cosn], i * 7);
+    }
+    return out;
+  }
+  function clumpShortfall(sph, S, n) {
+    let worst = 0; for (let i = 0; i < n; i++) { let b = 1e9; for (const s of sph) { const d = Math.hypot(S[i * 7] - s[0], S[i * 7 + 1] - s[1], S[i * 7 + 2] - s[2]) - s[3]; if (d < b) b = d; } if (b > worst) worst = b; }
+    return worst;
+  }
+  function clumpRim(sph, S, n) {   // worst shortfall on the side/edge (|n_z| < 0.9), where pills roll and wedge
+    let worst = 0; for (let i = 0; i < n; i++) { if (Math.abs(S[i * 7 + 5]) > 0.9) continue; let b = 1e9; for (const s of sph) { const d = Math.hypot(S[i * 7] - s[0], S[i * 7 + 1] - s[1], S[i * 7 + 2] - s[2]) - s[3]; if (d < b) b = d; } if (b > worst) worst = b; }
+    return worst;
+  }
+  function capsuleClump(r, hs, tol, maxs) {
+    if (hs <= 1e-9) return [[0, 0, 0, r]];
+    const d = 2 * Math.sqrt(Math.max(2 * r * tol - tol * tol, 1e-12)), n = Math.min(maxs, Math.max(2, Math.ceil(2 * hs / d) + 1)), out = [];
+    for (let k = 0; k < n; k++) out.push([-hs + 2 * hs * k / (n - 1), 0, 0, r]);
+    return out;
+  }
+  function tabletClump(R, ht, re, tol, faceTol, maxs, S, n) {
+    const layout = (rho, zl, rimTol, fTol) => {
+      const Rc = R - rho, out = [];
+      let nr = 1; if (Rc > 1e-9) for (nr = 3; nr < 400; nr++) { const half = PI / nr, gap = (Rc + rho) - Rc * Math.cos(half) - Math.sqrt(Math.max(rho * rho - (Rc * Math.sin(half)) ** 2, 0)); if (gap <= rimTol) break; }
+      const dF = Math.sqrt(3) * Math.sqrt(Math.max(2 * rho * fTol - fTol * fTol, 1e-12)), inner = [];
+      if (Rc > 1e-9) for (let k = 1; ; k++) { const rr = Rc - k * dF; if (rr <= dF * 0.45) { inner.push([0, 1]); break; } inner.push([rr, Math.max(3, Math.ceil(TAU * rr / dF))]); }
+      zl.forEach((z, li) => {
+        const rings = (li === 0 || li === zl.length - 1) ? [[Rc, nr]].concat(inner) : [[Rc, nr]];
+        rings.forEach(([rr, nn], ri) => { const off = (ri & 1) ? PI / nn : 0; for (let k = 0; k < nn; k++) { const a = off + TAU * k / nn; out.push([rr * Math.cos(a), rr * Math.sin(a), z, rho]); } });
+      });
+      return out;
+    };
+    const opts = [];
+    for (let scale = 1; scale <= 16 && !opts.length; scale *= 1.25) for (const f of [1, 0.75, 0.5, 0.25, 0]) {
+      const rho = re + (ht - re) * f, hzl = ht - rho, st = 2 * Math.sqrt(Math.max(2 * rho * tol * scale - (tol * scale) ** 2, 1e-12));
+      const m = hzl <= 1e-6 ? 1 : Math.max(2, Math.ceil(2 * hzl / st) + 1), zl = m === 1 ? [0] : Array.from({ length: m }, (_, k) => -hzl + 2 * hzl * k / (m - 1));
+      const c = layout(rho, zl, tol * scale, faceTol * scale); if (c.length <= maxs) opts.push({ c, rim: clumpRim(c, S, n) });
+    }
+    const best = Math.min(...opts.map(o => o.rim)), ok = o => o.rim <= best * 1.25 + 0.03e-3;
+    opts.sort((a, b) => (ok(a) ? 0 : 1) - (ok(b) ? 0 : 1) || a.c.length - b.c.length);
+    return opts[0].c;
+  }
+  function medialClump(dep, S, n, hx, hy, hz, tol, maxs) {
+    const ax = [hx, hy, hz], small = ax.indexOf(Math.min(hx, hy, hz)), o = [0, 1, 2].filter(i => i !== small), C = [], g = 30;
+    for (let i = -g; i <= g; i++) for (let j = -g; j <= g; j++) {
+      const p = [0, 0, 0]; p[o[0]] = i * ax[o[0]] / g; p[o[1]] = j * ax[o[1]] / g; if (dep(p[0], p[1], p[2]) <= 0) continue;
+      let r = 1e9; for (let k = 0; k < n; k++) { const d = Math.hypot(p[0] - S[k * 7], p[1] - S[k * 7 + 1], p[2] - S[k * 7 + 2]); if (d < r) r = d; }
+      if (r > 0.3 * ax[small]) C.push([p[0], p[1], p[2], r]);
+    }
+    const cov = C.map(c => { const l = []; for (let k = 0; k < n; k++) if (Math.hypot(c[0] - S[k * 7], c[1] - S[k * 7 + 1], c[2] - S[k * 7 + 2]) - c[3] <= tol) l.push(k); return l; });
+    const covered = new Uint8Array(n), gain = cov.map(l => l.length), out = []; let nc = 0;
+    while (out.length < maxs && nc < 0.998 * n) {
+      let best = -1, bv = 0;
+      for (let c = 0; c < C.length; c++) { if (gain[c] <= bv) continue; let v = 0; for (const k of cov[c]) if (!covered[k]) v++; gain[c] = v; if (v > bv) { bv = v; best = c; } }
+      if (best < 0) break; out.push(C[best].slice()); for (const k of cov[best]) if (!covered[k]) { covered[k] = 1; nc++; }
+    }
+    return out;
+  }
+  const _clumpCache = new Map();
+  function pillGeometry(spec, dep) {
+    const key = [spec.shape, spec.L, spec.W, spec.T, spec.edge].join('|'); if (_clumpCache.has(key)) return _clumpCache.get(key);
+    const hx = spec.L * 0.5e-3, hy = spec.W * 0.5e-3, hz = spec.T * 0.5e-3, minD = 2 * Math.min(hx, hy, hz);
+    const tol = Math.min(0.15e-3, Math.max(0.06e-3, 0.03 * minD));
+    // surface: aim ~0.1 mm^2 per patch (capped) so even a light 0.05 mm press spans several patches
+    const areaEst = 4 * PI * Math.pow(((hx * hy) ** 1.6 + (hx * hz) ** 1.6 + (hy * hz) ** 1.6) / 3, 1 / 1.6);
+    const NS = Math.max(800, Math.min(5000, Math.round(areaEst / 0.1e-6)));
+    const S = pillSurface(dep, hx, hy, hz, NS);
+    let sph;
+    if (spec.shape === 'sphere') sph = [[0, 0, 0, hy]];
+    else if (spec.shape === 'capsule') sph = capsuleClump(hy, Math.max(hx - hy, 0), tol, 24);
+    else if (spec.shape === 'tablet') { const re = Math.max(0.05e-3, Math.min(hz, spec.edge * hz)); sph = tabletClump(hy, hz, re, tol, 3 * tol, 32, S, NS); }
+    else sph = medialClump(dep, S, NS, hx, hy, hz, 2 * tol, 24);   // hard contacts only; the foam sees the true surface
+    // partition the true surface among the spheres (nearest sphere surface); per sphere: points relative to its centre
+    const lists = sph.map(() => []), margin = sph.map(() => 0);
+    for (let i = 0; i < NS; i++) {
+      let b = -1, bd = 1e9; for (let s = 0; s < sph.length; s++) { const c = sph[s], d = Math.abs(Math.hypot(S[i * 7] - c[0], S[i * 7 + 1] - c[1], S[i * 7 + 2] - c[2]) - c[3]); if (d < bd) { bd = d; b = s; } }
+      const c = sph[b], gap = Math.hypot(S[i * 7] - c[0], S[i * 7 + 1] - c[1], S[i * 7 + 2] - c[2]) - c[3];
+      lists[b].push(S[i * 7] - c[0], S[i * 7 + 1] - c[1], S[i * 7 + 2] - c[2], S[i * 7 + 6]); if (gap > margin[b]) margin[b] = gap;
+    }
+    let area = 0; for (let i = 0; i < NS; i++) area += S[i * 7 + 6];
+    const g = { spheres: sph, patches: lists.map(l => new Float64Array(l)), margin, area, nSurf: NS, shortfall: clumpShortfall(sph, S, NS) };
+    if (_clumpCache.size > 32) _clumpCache.clear(); _clumpCache.set(key, g);
+    return g;
+  }
+
   function makePillType(specIn) {
     const spec = normSpec(specIn), dep = depthFn(spec);
     const mn = Math.min(spec.L, spec.W, spec.T) * 0.5e-3;
@@ -227,20 +330,22 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     for (let i = 0; i < pts.length; i += 3) { const x = pts[i], y = pts[i + 1], z = pts[i + 2]; Ix += y * y + z * z; Iy += x * x + z * z; Iz += x * x + y * y; }
     const mass = vol * spec.density, k = spec.density * dV;
     const I = [Ix * k, Iy * k, Iz * k], Imin = Math.min(I[0], I[1], I[2]);
-    // greedy inscribed-sphere clump
-    const step = mn / 3.2, cand = [], nx_ = Math.ceil(bx / step), ny_ = Math.ceil(by / step), nz_ = Math.ceil(bz / step);
-    for (let i = -nx_; i <= nx_; i++) for (let j = -ny_; j <= ny_; j++) for (let k = -nz_; k <= nz_; k++) {
-      const x = i * step, y = j * step, z = k * step, d = dep(x, y, z); if (d > mn * 0.55) cand.push([x, y, z, d]);
+    // collision clump + true-surface foam patches (see pillGeometry); old greedy fill kept only as a fallback
+    let G = null, sph;
+    try { G = pillGeometry(spec, dep); sph = G.spheres.map(a => a.slice()); } catch (err) { G = null; }
+    if (!G) {
+      const step = mn / 3.2, cand = [], nx_ = Math.ceil(bx / step), ny_ = Math.ceil(by / step), nz_ = Math.ceil(bz / step);
+      for (let i = -nx_; i <= nx_; i++) for (let j = -ny_; j <= ny_; j++) for (let k = -nz_; k <= nz_; k++) { const x = i * step, y = j * step, z = k * step, d = dep(x, y, z); if (d > mn * 0.55) cand.push([x, y, z, d]); }
+      cand.sort((a, b) => b[3] - a[3]); sph = [];
+      const blocked = (x, y, z, r) => { for (const s of sph) { const dx = x - s[0], dy = y - s[1], dz = z - s[2], lim = Math.max(s[3], 1.35 * Math.min(r, s[3])); if (dx * dx + dy * dy + dz * dz < lim * lim) return true; } return false; };
+      for (const c of cand) { if (sph.length >= 40) break; if (!blocked(c[0], c[1], c[2], c[3])) sph.push([c[0], c[1], c[2], c[3] * (spec.shape === 'ellipsoid' ? 0.99 : 1)]); }
+      if (!sph.length) sph.push([0, 0, 0, mn]);
     }
-    cand.sort((a, b) => b[3] - a[3]);
-    const sph = [], MAXS = 40;
-    const blocked = (x, y, z, r) => { for (const s of sph) { const dx = x - s[0], dy = y - s[1], dz = z - s[2], lim = Math.max(s[3], 1.35 * Math.min(r, s[3])); if (dx * dx + dy * dy + dz * dz < lim * lim) return true; } return false; };
-    for (const c of cand) { if (sph.length >= MAXS) break; if (!blocked(c[0], c[1], c[2], c[3])) sph.push([c[0], c[1], c[2], c[3] * (spec.shape === 'ellipsoid' ? 0.99 : 1)]); }
-    if (!sph.length) sph.push([0, 0, 0, mn]);
     let inU = 0;
     for (let i = 0; i < pts.length; i += 3) { for (const s of sph) { const dx = pts[i] - s[0], dy = pts[i + 1] - s[1], dz = pts[i + 2] - s[2]; if (dx * dx + dy * dy + dz * dz <= s[3] * s[3]) { inU++; break; } } }
     let rmax = 0, brad = 0; for (const s of sph) { rmax = Math.max(rmax, s[3]); brad = Math.max(brad, Math.hypot(s[0], s[1], s[2]) + s[3]); }
-    return { spec, mass, I, Imin, vol, spheres: sph, rmax, brad: Math.max(brad, Math.max(spec.L, spec.W, spec.T) * 0.5e-3), coverage: inU / (pts.length / 3), depth: dep };
+    return { spec, mass, I, Imin, vol, spheres: sph, rmax, brad: Math.max(brad, Math.max(spec.L, spec.W, spec.T) * 0.5e-3), coverage: inU / (pts.length / 3), depth: dep,
+      patches: G ? G.patches : null, patchMargin: G ? G.margin : null, surfArea: G ? G.area : 0, shortfall: G ? G.shortfall : null };
   }
 
   /* ------------------------------------------------------------------ quaternion helpers */
@@ -482,6 +587,18 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     return (H[qa * tx.nv + v0] * (1 - a) + H[qb * tx.nv + v0] * a) * (1 - b) + (H[qa * tx.nv + v1] * (1 - a) + H[qb * tx.nv + v1] * a) * b;
   }
   const GOLD = PI * (3 - Math.sqrt(5));
+  // texture height + its exact slopes (piecewise bilinear) in one lookup: out = [h, dh/dq, dh/dv]
+  function texHG(tx, q, v, out) {
+    let fq = ((q % tx.Lt) + tx.Lt) % tx.Lt / tx.Lt * tx.nq - 0.5, fv = v / tx.W * tx.nv - 0.5, clampV = false;
+    if (fv < 0) { fv = 0; clampV = true; } else if (fv > tx.nv - 1) { fv = tx.nv - 1; clampV = true; }
+    const q0 = Math.floor(fq), v0 = Math.min(Math.floor(fv), tx.nv - 2 < 0 ? 0 : tx.nv - 2), a = fq - q0, b = fv - v0;
+    const qa = ((q0 % tx.nq) + tx.nq) % tx.nq, qb = (qa + 1) % tx.nq, v1 = Math.min(v0 + 1, tx.nv - 1), H = tx.h;
+    const h00 = H[qa * tx.nv + v0], h10 = H[qb * tx.nv + v0], h01 = H[qa * tx.nv + v1], h11 = H[qb * tx.nv + v1];
+    out[0] = (h00 * (1 - a) + h10 * a) * (1 - b) + (h01 * (1 - a) + h11 * a) * b;
+    out[1] = ((h10 - h00) * (1 - b) + (h11 - h01) * b) * tx.nq / tx.Lt;
+    out[2] = clampV ? 0 : ((h01 - h00) * (1 - a) + (h11 - h10) * a) * tx.nv / tx.W;
+  }
+  const _APN = 6000, _ap = new Float64Array(_APN * 11), _apg = new Float64Array(_APN), _qb = [1, 0, 0, 0];
 
   function foamContact(sim, B, bi, sx, sy, sz, rs, belt, dt, si) {
     const P = sim.P, f = sim.foam, h = P.thickness, Rb = sim.Rb, Lc = sim.Lc;
@@ -506,7 +623,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (outW === 0) { D = qn; n2x = xl / d2; n2u = lu / d2; nvv = 0; }
     else if (qn <= 0) { D = outW; n2x = 0; n2u = 0; nvv = v < 0 ? -1 : 1; }
     else { D = Math.hypot(qn, outW); n2x = qn / D * xl / d2; n2u = qn / D * lu / d2; nvv = (v < 0 ? -1 : 1) * outW / D; }
-    const pen = rs - D; if (pen <= 0) return false;
+    const T = B.type[bi], PT = T.patches ? T.patches[si] : null, mgn = PT ? T.patchMargin[si] : 0;
+    const pen = rs - D; if (pen <= -mgn) return false;    // true surface may stand up to mgn proud of the sphere
     const nx = sgn * n2x * sim.EX[0] + n2u * sim.EU[0] + nvv * sim.EV[0], ny = sgn * n2x * sim.EX[1] + n2u * sim.EU[1] + nvv * sim.EV[1], nz = sgn * n2x * sim.EX[2] + n2u * sim.EU[2] + nvv * sim.EV[2];
     // surface velocity: travel tangent (n_u, -n_x) in the local (x,u) plane, facing side moves toward -u
     const vb = sim.beltSpeed(); let tlx = n2u, tlu = -n2x; if (outW > 0 && qn <= 0) { tlx = 0; tlu = 0; }
@@ -515,8 +633,40 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const sig = loopSigma(xl, u, tcl, Rmid, Lc);
     let q = (sig - sim.S) % cl.perim; if (q < 0) q += cl.perim;
     const vcl = Math.min(Math.max(v, 0), sim.W);
-    const T = B.type[bi], rx = -nx * rs, ry = -ny * rs, rz = -nz * rs;
-        // contact-point velocity (sphere surface point)
+    const tqx = sgn * tlx * sim.EX[0] + tlu * sim.EU[0], tqy = sgn * tlx * sim.EX[1] + tlu * sim.EU[1], tqz = sgn * tlx * sim.EX[2] + tlu * sim.EU[2];
+    const ci = cl.perm[belt], cv = cl.vis[belt], dentArr = cl.dent[belt], tch = cl.touched[belt], texOn = TX && outW === 0;
+    // ---- pass 1: the real pill surface (this sphere's share of it) against the real belt surface. Each patch point is
+    // mapped into the belt frame and its depth measured exactly to the belt (straight run, pulley wrap or cam bulge),
+    // so a flat tablet face on the curved crown only loads where it actually touches, and patches past a belt edge
+    // carry nothing. Active patches are stored, then loaded in pass 2 with the contact-point velocity.
+    let npts = 0, wsum = 0, wux = 0, wuy = 0, wuz = 0;
+    if (PT) {
+      const qb = _qb; qb[0] = B.q[bi * 4]; qb[1] = B.q[bi * 4 + 1]; qb[2] = B.q[bi * 4 + 2]; qb[3] = B.q[bi * 4 + 3];
+      qconjv(qb, sgn * sim.EX[0], sgn * sim.EX[1], sgn * sim.EX[2], _r3); const ax0 = _r3[0], ax1 = _r3[1], ax2 = _r3[2];
+      qconjv(qb, sim.EU[0], sim.EU[1], sim.EU[2], _r3); const au0 = _r3[0], au1 = _r3[1], au2 = _r3[2];
+      qconjv(qb, sim.EV[0], sim.EV[1], sim.EV[2], _r3); const av0 = _r3[0], av1 = _r3[1], av2 = _r3[2];
+      qconjv(qb, nx, ny, nz, _r3); const an0 = _r3[0], an1 = _r3[1], an2 = _r3[2], pr = pen - rs, cull = outW === 0;
+      const Rtop = Rout + hmax, Wb = sim.W, AP = _ap;
+      for (let j = 0; j < PT.length; j += 4) {
+        const ux = PT[j], uy = PT[j + 1], uz = PT[j + 2];
+        // the belt surface is convex, so the tangent-plane depth is an upper bound on the exact depth: cheap reject
+        if (cull && pr - (ux * an0 + uy * an1 + uz * an2) <= 0) continue;
+        const ox = ux * ax0 + uy * ax1 + uz * ax2, ou = ux * au0 + uy * au1 + uz * au2, vp = v + ux * av0 + uy * av1 + uz * av2;
+        if (vp < 0 || vp > Wb) continue;                       // past the belt edge: nothing to press on
+        const xp = xl + ox, up = u + ou, tp = up < 0 ? 0 : (up > Lc ? Lc : up), lp = up - tp, dp = Math.sqrt(xp * xp + lp * lp);
+        let dl = Rtop - dp; if (dl <= 0 || dp < 1e-9) continue;
+        const qq = q + ox * tlx + ou * tlu; let hT = 0, gq = 0, gv = 0;
+        if (texOn) { texHG(TX, qq, vp, _r3); hT = _r3[0]; gq = _r3[1]; gv = _r3[2]; dl -= hmax - hT; if (dl <= 0) continue; }
+        const o = npts * 11; AP[o] = dl; AP[o + 1] = qq; AP[o + 2] = vp; AP[o + 3] = PT[j + 3]; AP[o + 4] = hT; AP[o + 5] = xp / dp; AP[o + 6] = lp / dp;
+        AP[o + 7] = ux; AP[o + 8] = uy; AP[o + 9] = uz; AP[o + 10] = gq; _apg[npts] = gv;
+        const w = dl * PT[j + 3]; wsum += w; wux += w * ux; wuy += w * uy; wuz += w * uz; npts++;
+        if (npts >= _APN) break;
+      }
+      if (npts === 0) return false;
+    } else if (pen <= 0) return false;
+    // load centroid (world, relative to the pill centre): where the foam actually pushes
+    let rx = -nx * rs, ry = -ny * rs, rz = -nz * rs;
+    if (PT) { qmulv(_qb, wux / wsum, wuy / wsum, wuz / wsum, _r3); rx = _r3[0]; ry = _r3[1]; rz = _r3[2]; }
     const cx = sx - B.px[bi] + rx, cy = sy - B.py[bi] + ry, cz = sz - B.pz[bi] + rz;
     const px_ = B.vx[bi] + B.wy[bi] * cz - B.wz[bi] * cy, py_ = B.vy[bi] + B.wz[bi] * cx - B.wx[bi] * cz, pz_ = B.vz[bi] + B.wx[bi] * cy - B.wy[bi] * cx;
     let bumpV = 0;
@@ -527,39 +677,41 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const vrx = px_ - svx - bumpV * nx, vry = py_ - svy - bumpV * ny, vrz = pz_ - svz - bumpV * nz;
     const vn = vrx * nx + vry * ny + vrz * nz;              // >0 : separating
     const vtx = vrx - vn * nx, vty = vry - vn * ny, vtz = vrz - vn * nz;
-    const texOn = TX && outW === 0, a2 = Math.max(0, Math.min(2 * rs * pen - pen * pen, rs * rs)), a = Math.sqrt(a2), K = texOn ? 9 : 4, Ak = PI * a2 / K;
-    let Fn = 0, Fv = 0, epsAcc = 0, nAct = 0, Gq = 0, Gv = 0, Gw = 0;
-    const ci = cl.perm[belt], cv = cl.vis[belt], dentArr = cl.dent[belt], tch = cl.touched[belt];
-    for (let k = 0; k < K; k++) {
-      const rho = a * Math.sqrt((k + 0.5) / K), ang = texOn ? k * GOLD : k * PI / 2;
-      let dloc = pen - (rs - Math.sqrt(Math.max(rs * rs - rho * rho, 0)));
-      let qq = q + rho * Math.cos(ang); const vv = vcl + rho * Math.sin(ang);
-      let hT = 0;
-      if (texOn) { hT = texH(TX, qq, vv); dloc -= hmax - hT; }   // local surface sits (hmax - hT) below the ridge tops
-      qq = ((qq % cl.perim) + cl.perim) % cl.perim; let iq = Math.floor(qq / cl.dq); if (iq >= cl.nq) iq = cl.nq - 1;
-      let iv = Math.floor(vv / (sim.W / cl.nv)); if (iv < 0) iv = 0; if (iv >= cl.nv) iv = cl.nv - 1;
+    let Fn = 0, Fv = 0, epsAcc = 0, nAct = 0, Gq = 0, Gv = 0, Gw = 0, a2 = 0;
+    let SX = 0, SU = 0, AXx = 0, AXy = 0, AXz = 0, AUx = 0, AUy = 0, AUz = 0;   // patch-normal force sums (belt frame) + their moments
+    const dvc = sim.W / cl.nv;
+    // one foam "spring" per surface patch: local compression -> stress (with hysteresis/viscosity) x patch area
+    const patch = (dloc, qq, vv, dA, hT) => {
+      qq = ((qq % cl.perim) + cl.perim) % cl.perim; let iq = Math.floor(qq / cl.dq); if (iq >= cl.nq) iq = cl.nq - 1; let iv = Math.floor(vv / dvc); if (iv < 0) iv = 0; if (iv >= cl.nv) iv = cl.nv - 1;
       const c = iq * cl.nv + iv, ep = ci[c] + cv[c];
-      const dEff = dloc - h * ep; if (dEff <= 0) continue;
+      const dEff = dloc - h * ep; if (dEff <= 0) return 0;
       const hl = Math.max(0.25 * h, h + hT) * (1 - ep); let e = dEff / hl, stop = 0; if (e > 0.95) { stop = dEff - 0.95 * hl; e = 0.95; }
-      const edot = -vn / hl;                                  // compression rate
-      let s = foamStress(e, f) * (1 - f.H * Math.max(0, -Math.tanh(edot / 5)));
-      Fv += f.E * f.tauV * edot * Ak;
-      const dF = s * Ak + (stop > 0 ? P.contactFreq * P.contactFreq * T.mass * stop / K : 0);
-      Fn += dF; epsAcc += e; nAct++;
-      if (texOn && dF > 0) {   // local surface slope: ridge flanks / groove walls push sideways, not just straight out
-        const dq = TX.Lt / TX.nq, dv = TX.W / TX.nv;
-        Gq += dF * (texH(TX, qq + dq, vv) - texH(TX, qq - dq, vv)) / (2 * dq); Gv += dF * (texH(TX, qq, vv + dv) - texH(TX, qq, vv - dv)) / (2 * dv); Gw += dF;
+      const edot = -vn / hl;
+      const sgm = foamStress(e, f) * (1 - f.H * Math.max(0, -Math.tanh(edot / 5)));
+      Fv += f.E * f.tauV * edot * dA;
+      const dF = sgm * dA + (stop > 0 ? P.contactFreq * P.contactFreq * T.mass * stop * dA / Math.max(T.surfArea * 0.25, dA) : 0);
+      Fn += dF; epsAcc += e * dA; nAct += dA; a2 += dA / PI;
+      if (e > 0.02) { const dp = (f.kc * Math.max(0, e - f.epsY) + f.ks * e) * dt; if (dp > 0 && ep < f.fpermMax) { ci[c] += f.fperm * dp; cv[c] += (1 - f.fperm) * dp; } tch[c] = 1; const dd = dEff / h; if (dd > dentArr[c]) dentArr[c] = dd; }
+      return dF;
+    };
+    if (PT) {
+      const AP = _ap;
+      for (let k = 0; k < npts; k++) {
+        const o = k * 11, dF = patch(AP[o], AP[o + 1], AP[o + 2], AP[o + 3], AP[o + 4]); if (dF <= 0) continue;
+        const a_ = dF * AP[o + 5], b_ = dF * AP[o + 6]; SX += a_; SU += b_;
+        AXx += a_ * AP[o + 7]; AXy += a_ * AP[o + 8]; AXz += a_ * AP[o + 9]; AUx += b_ * AP[o + 7]; AUy += b_ * AP[o + 8]; AUz += b_ * AP[o + 9];
+        if (texOn) { Gq += dF * AP[o + 10]; Gv += dF * _apg[k]; Gw += dF; }
       }
-      if (e > 0.02) {
-        const dp = (f.kc * Math.max(0, e - f.epsY) + f.ks * e) * dt;
-        if (dp > 0 && ep < f.fpermMax) { ci[c] += f.fperm * dp; cv[c] += (1 - f.fperm) * dp; }
-        tch[c] = 1; const dd = dEff / h; if (dd > dentArr[c]) dentArr[c] = dd;
-      }
+    } else {   // fallback: analytic cap of the sphere (4 rings)
+      const ca2 = Math.max(0, Math.min(2 * rs * pen - pen * pen, rs * rs)), ca = Math.sqrt(ca2), K = 4;
+      for (let k = 0; k < K; k++) { const rho = ca * Math.sqrt((k + 0.5) / K), ang = k * PI / 2, qq = q + rho * Math.cos(ang), vv = vcl + rho * Math.sin(ang);
+        let dl = pen - (rs - Math.sqrt(Math.max(rs * rs - rho * rho, 0))), hT = 0, gq = 0, gv = 0; if (texOn) { texHG(TX, qq, vv, _r3); hT = _r3[0]; gq = _r3[1]; gv = _r3[2]; dl -= hmax - hT; }
+        if (dl > 0) { const dF = patch(dl, qq, vv, PI * ca2 / K, hT); if (dF > 0 && texOn) { Gq += dF * gq; Gv += dF * gv; Gw += dF; } } }
     }
     if (nAct === 0) return false;
     B.nc[bi]++; const shr = B.ncp[bi];
     { const lim = 0.5 * meffOf(T, cx, cy, cz) * Math.abs(vn) / dt / shr; if (Fv > lim) Fv = lim; else if (Fv < -lim) Fv = -lim; Fn += Fv; if (Fn < 0) Fn = 0; }
-    const epsM = epsAcc / nAct; sim.stats.meanEps += epsM; sim.stats.contacts++; if (epsM > sim.stats.maxEps) sim.stats.maxEps = epsM;
+    const epsM = epsAcc / nAct, a = Math.sqrt(a2); sim.stats.meanEps += epsM; sim.stats.contacts++; if (epsM > sim.stats.maxEps) sim.stats.maxEps = epsM;
     const mu = T.spec.muFoam * f.grip * P.muFoamScale * (1 + f.wrap * epsM);
     const cap = mu * (Fn + f.adh * PI * a2);
     // Coulomb friction with real static grip: a tangential spring (Cundall-Strack) per sphere-belt contact stores the
@@ -576,9 +728,26 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       fnx = nx - gq * tqx - gv * sim.EV[0]; fny = ny - gq * tqy - gv * sim.EV[1]; fnz = nz - gq * tqz - gv * sim.EV[2];
       const fl = Math.hypot(fnx, fny, fnz); fnx /= fl; fny /= fl; fnz /= fl;
     }
-    const Fx = Fn * fnx + ftx, Fy = Fn * fny + fty, Fz = Fn * fnz + ftz;
+    let Fx, Fy, Fz, Tx, Ty, Tz;
+    const Fel = Math.hypot(SX, SU);
+    if (PT && Fel > 0) {
+      // elastic part: exact sum of the per-patch normal forces and of their moments about the pill centre
+      const ex_ = SX * sgn; let wfx = ex_ * sim.EX[0] + SU * sim.EU[0], wfy = ex_ * sim.EX[1] + SU * sim.EU[1], wfz = ex_ * sim.EX[2] + SU * sim.EU[2];
+      qconjv(_qb, sgn * sim.EX[0], sgn * sim.EX[1], sgn * sim.EX[2], _r3); const ax0 = _r3[0], ax1 = _r3[1], ax2 = _r3[2];
+      qconjv(_qb, sim.EU[0], sim.EU[1], sim.EU[2], _r3); const au0 = _r3[0], au1 = _r3[1], au2 = _r3[2];
+      qmulv(_qb, AXy * ax2 - AXz * ax1 + AUy * au2 - AUz * au1, AXz * ax0 - AXx * ax2 + AUz * au0 - AUx * au2, AXx * ax1 - AXy * ax0 + AUx * au1 - AUy * au0, _r3);
+      const scx = sx - B.px[bi], scy = sy - B.py[bi], scz = sz - B.pz[bi];
+      // rest (viscous, texture tilt, friction) acts at the load centroid; Fn already includes Fv (and the clamp)
+      let extra = Fn - Fel; const ux_ = wfx / Fel, uy_ = wfy / Fel, uz_ = wfz / Fel;
+      if (extra < 0) { const kS = Fn / Fel; wfx *= kS; wfy *= kS; wfz *= kS; _r3[0] *= kS; _r3[1] *= kS; _r3[2] *= kS; extra = 0; }   // rebound damping can only unload, never pull
+      const rfx = extra * ux_ + Fn * (fnx - nx) + ftx, rfy = extra * uy_ + Fn * (fny - ny) + fty, rfz = extra * uz_ + Fn * (fnz - nz) + ftz;
+      Fx = wfx + rfx; Fy = wfy + rfy; Fz = wfz + rfz;
+      Tx = _r3[0] + scy * wfz - scz * wfy + cy * rfz - cz * rfy; Ty = _r3[1] + scz * wfx - scx * wfz + cz * rfx - cx * rfz; Tz = _r3[2] + scx * wfy - scy * wfx + cx * rfy - cy * rfx;
+    } else {
+      Fx = Fn * fnx + ftx; Fy = Fn * fny + fty; Fz = Fn * fnz + ftz;
+      Tx = cy * Fz - cz * Fy; Ty = cz * Fx - cx * Fz; Tz = cx * Fy - cy * Fx;
+    }
     B.fx[bi] += Fx; B.fy[bi] += Fy; B.fz[bi] += Fz;
-    let Tx = cy * Fz - cz * Fy, Ty = cz * Fx - cx * Fz, Tz = cx * Fy - cy * Fx;
     const wn = B.wx[bi] * nx + B.wy[bi] * ny + B.wz[bi] * nz;
     const wtx = B.wx[bi] - wn * nx, wty = B.wy[bi] - wn * ny, wtz = B.wz[bi] - wn * nz, wt = Math.hypot(wtx, wty, wtz);
     if (wt > 1e-9) { let tm = (0.15 + f.H) * a * Fn * Math.min(wt, 1); const lim = 0.5 * T.Imin * wt / dt / shr; if (tm > lim) tm = lim; Tx -= tm * wtx / wt; Ty -= tm * wty / wt; Tz -= tm * wtz / wt; }
@@ -590,7 +759,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   /* Tangential (stick-slip) friction spring, shared by every contact type. xi: [ex,ey,ez] at offset o. The stored shear
      displacement is rotated into the current tangent plane, advanced by the slip, turned into a spring+damper force and
      capped at the Coulomb limit (slip). Writes the friction force into _ft. mt = effective tangential mass of the contact. */
-  const _ft = [0, 0, 0];
+  const _ft = [0, 0, 0], _r3 = [0, 0, 0];
   function tangSpring(xi, o, fresh, nx, ny, nz, vtx, vty, vtz, mt, cap, dt) {
     let ex = fresh ? 0 : xi[o], ey = fresh ? 0 : xi[o + 1], ez = fresh ? 0 : xi[o + 2];
     { const m0 = Math.hypot(ex, ey, ez); if (m0 > 0) { const en = ex * nx + ey * ny + ez * nz; ex -= en * nx; ey -= en * ny; ez -= en * nz; const m1 = Math.hypot(ex, ey, ez); if (m1 > 1e-15) { const r = m0 / m1; ex *= r; ey *= r; ez *= r; } } }
@@ -604,6 +773,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   /* ------------------------------------------------------------------ main step */
   const CAPS = 8192, KT_W = 900;   // KT_W: tangential contact frequency (rad/s), half the normal one
   const _sx = new Float64Array(CAPS), _sy = new Float64Array(CAPS), _sz = new Float64Array(CAPS), _sr = new Float64Array(CAPS), _sb = new Int32Array(CAPS), _si = new Int32Array(CAPS);
+  const _bst = new Int32Array(1024), _bns = new Int32Array(1024), _bo = new Int32Array(1024), _bx = new Float64Array(1024);   // per-pill sphere ranges + broad phase
   const _svx = new Float64Array(CAPS), _svy = new Float64Array(CAPS), _svz = new Float64Array(CAPS);
   let _nxt = new Int32Array(CAPS); const _key = new Int32Array(CAPS);
   let _head = new Int32Array(1 << 16).fill(-1);
@@ -623,6 +793,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     for (let i = 0; i < n; i++) {
       if (!B.alive[i]) continue;
       const T = B.type[i]; q[0] = B.q[i * 4]; q[1] = B.q[i * 4 + 1]; q[2] = B.q[i * 4 + 2]; q[3] = B.q[i * 4 + 3];
+      _bst[i] = ns; _bns[i] = T.spheres.length;
       for (let si = 0; si < T.spheres.length; si++) { const s = T.spheres[si];
         qmulv(q, s[0], s[1], s[2], rot);
         _sx[ns] = B.px[i] + rot[0]; _sy[ns] = B.py[i] + rot[1]; _sz[ns] = B.pz[i] + rot[2]; _sr[ns] = s[3]; _sb[ns] = i; _si[ns] = si;
@@ -635,17 +806,22 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     sim.nSpheres = ns;
     sim.stats.meanEps = 0; sim.stats.contacts = 0; sim.stats.maxEps = 0; sim.stats.powerAcc = 0;
     if (ns > 1) {
-      let rm = 0; for (let k = 0; k < ns; k++) if (_sr[k] > rm) rm = _sr[k];
-      const cs = Math.max(2 * rm, 4e-3), X0 = -0.02, Y0 = -0.03, Z0 = -0.02, NX = Math.ceil(0.10 / cs) + 1, NY = Math.ceil(0.20 / cs) + 1, NZ = Math.ceil(0.46 / cs) + 1;
-      if (_head.length < NX * NY * NZ) { _head = new Int32Array(NX * NY * NZ); _head.fill(-1); }   // kept all -1 between steps: only used cells are reset (below)
-      const cidx = (v, o, N) => { let c = Math.floor((v - o) / cs); return c < 0 ? 0 : (c >= N ? N - 1 : c); };
-      for (let k = 0; k < ns; k++) { const key = (cidx(_sx[k], X0, NX) * NY + cidx(_sy[k], Y0, NY)) * NZ + cidx(_sz[k], Z0, NZ); _nxt[k] = _head[key]; _head[key] = k; _key[k] = key; }
-      for (let k = 0; k < ns; k++) {
-        const ci = cidx(_sx[k], X0, NX), cj = cidx(_sy[k], Y0, NY), ck = cidx(_sz[k], Z0, NZ);
-        for (let a = Math.max(ci - 1, 0); a <= Math.min(ci + 1, NX - 1); a++) for (let b = Math.max(cj - 1, 0); b <= Math.min(cj + 1, NY - 1); b++) for (let c = Math.max(ck - 1, 0); c <= Math.min(ck + 1, NZ - 1); c++) {
-          let m = _head[(a * NY + b) * NZ + c];
-          for (; m >= 0; m = _nxt[m]) {
-            if (m <= k || _sb[m] === _sb[k]) continue;
+      // broad phase on whole pills (sweep-and-prune on bounding spheres), then sphere pairs only between pills that
+      // can touch; each pill's spheres are contiguous in _s*, so pair (k in i, m in j) keeps k < m and i < j
+      let nb = 0;
+      for (let i = 0; i < n; i++) if (B.alive[i]) { _bo[nb] = i; _bx[i] = B.px[i] - B.type[i].brad; nb++; }
+      const ord = _bo.subarray(0, nb); ord.sort((p_, q_) => _bx[p_] - _bx[q_]);
+      for (let oi = 0; oi < nb; oi++) {
+        const bi0 = ord[oi], Ri = B.type[bi0].brad, xi1 = B.px[bi0] + Ri;
+        for (let oj = oi + 1; oj < nb; oj++) {
+          const bj0 = ord[oj]; if (_bx[bj0] > xi1) break;
+          const Rj = B.type[bj0].brad, ex = B.px[bi0] - B.px[bj0], ey = B.py[bi0] - B.py[bj0], ez = B.pz[bi0] - B.pz[bj0], RR = Ri + Rj;
+          if (ex * ex + ey * ey + ez * ez >= RR * RR) continue;
+          const lo = bi0 < bj0 ? bi0 : bj0, hi = bi0 < bj0 ? bj0 : bi0, cxh = B.px[hi], cyh = B.py[hi], czh = B.pz[hi], Rh = B.type[hi].brad;
+          for (let k = _bst[lo], ke = _bst[lo] + _bns[lo]; k < ke; k++) {
+            const qx = _sx[k] - cxh, qy = _sy[k] - cyh, qz = _sz[k] - czh, rq = _sr[k] + Rh;
+            if (qx * qx + qy * qy + qz * qz >= rq * rq) continue;
+            for (let m = _bst[hi], me_ = _bst[hi] + _bns[hi]; m < me_; m++) {
             const ddx = _sx[k] - _sx[m], ddy = _sy[k] - _sy[m], ddz = _sz[k] - _sz[m], rr = _sr[k] + _sr[m], d2 = ddx * ddx + ddy * ddy + ddz * ddz;
             if (d2 >= rr * rr || d2 < 1e-18) continue;
             const d = Math.sqrt(d2), nx = ddx / d, ny = ddy / d, nz = ddz / d, pen = rr - d, i = _sb[k], j = _sb[m];
@@ -673,11 +849,11 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
             B.tx[i] += ry * Fz - rz * Fy; B.ty[i] += rz * Fx - rx * Fz; B.tz[i] += rx * Fy - ry * Fx;
             rx = cxm - B.px[j]; ry = cym - B.py[j]; rz = czm - B.pz[j];
             B.tx[j] -= ry * Fz - rz * Fy; B.ty[j] -= rz * Fx - rx * Fz; B.tz[j] -= rx * Fy - ry * Fx;
+            }
           }
         }
       }
     }
-    if (ns > 1) for (let k = 0; k < ns; k++) _head[_key[k]] = -1;
     const G = sim.grid, cp = _cp;
     const hasG = !!G;
     for (let k = 0; k < ns; k++) {
