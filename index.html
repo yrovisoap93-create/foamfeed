@@ -94,8 +94,9 @@ body.nonotes aside small{display:none}
 <div class="row"><label for="ctGap" title="pause between queued feeds">Gap between feeds</label><input type="range" id="ctGap" min="0" max="3000" step="50" value="300"><span class="v"><span id="ctGapV">300</span> ms</span></div>
 <div class="row"><label for="ctLash" title="free play in the worm 20:1 + pulley drive, as degrees at the belt drive shaft. After any reversal the motor turns through this before the belts move (delay = play ÷ shaft speed). Printed / plastic worm sets ~0.5–2°, machined ~0.1°">Gear backlash</label><input type="range" id="ctLash" min="0" max="3" step="0.05" value="0.5"><span class="v"><span id="ctLashV">0.5</span>°</span></div>
 <div class="row"><label for="ctVib" title="the speaker is switched with the motor: it only shakes while the conveyor runs (needs Vibration ON above)">Vibrate only while conveyor runs</label><input type="checkbox" id="ctVib" checked style="justify-self:start"></div>
-<div class="row"><label for="gtOn" title="when the normally-closed gate opens during a feed. On count: the stop sensor sees the pill, the servo opens the gate while the pill drops toward it. On feed start: the gate opens as soon as the belts start. Multi-pill feeds always open at start. Continuous mode holds the gate open.">Gate opens</label><select id="gtOn" style="grid-column:2/4"><option value="count">when the sensor counts the pill</option><option value="start">when the feed starts</option></select></div>
-<div class="row"><label for="gtHold" title="how long the gate stays open after the feed (or the last counted pill), then the servo closes it">Gate hold open</label><input type="range" id="gtHold" min="0" max="3000" step="50" value="1000"><span class="v"><span id="gtHoldV">1000</span> ms</span></div>
+<div class="row"><label for="gtWaitOpen" title="when a pill is called the servo opens the gate first; the conveyor and vibrator start only once it is fully open (~0.13 s with the MG90S), so a pill already at the exit never meets a half-open gate">Start belts after gate opens</label><input type="checkbox" id="gtWaitOpen" checked style="justify-self:start"></div>
+<div class="row"><label for="gtClose" title="the gate opens the moment a pill is called and closes once the S3 Out sensor has seen every pill the exit sensor counted leave and its beam is clear again; this adds a pause before the servo closes">Close delay after Out</label><input type="range" id="gtClose" min="0" max="1000" step="10" value="250"><span class="v"><span id="gtCloseV">250</span> ms</span></div>
+<div class="row"><label for="gtWait" title="safety fallback: if a counted pill never reaches the Out sensor (stuck in the chute, or two pills fell through as one beam break), close the gate this long after the last sensor activity and log it as missed. Also the close time when the Out sensor is switched off">Out sensor wait</label><input type="range" id="gtWait" min="0.5" max="15" step="0.5" value="3"><span class="v"><span id="gtWaitV">3</span> s</span></div>
 <div class="row"><label for="gtTrav" title="servo horn rotation from closed to open. Your linkage: the gate front edge clears the drop hole (ledge at y 33 mm) from 75.6°, and the gate tail hits the shell back wall (y 97 mm) beyond 78.7° — the servo then stalls there">Servo travel</label><input type="range" id="gtTrav" min="0" max="120" step="0.1" value="77.2"><span class="v"><span id="gtTravV">77.2</span>°</span></div>
 <div class="row"><label for="gtSpd" title="servo speed. MG90S: 0.10 s per 60° at 4.8 V, 0.08 s at 6 V; slower under load">Servo speed</label><input type="range" id="gtSpd" min="0.05" max="0.5" step="0.01" value="0.1"><span class="v"><span id="gtSpdV">0.1</span> s/60°</span></div>
 <div class="kv"><b>Gate</b><span id="r_gate"></span></div>
@@ -778,7 +779,7 @@ body.nonotes aside small{display:none}
     sim.setPillSpec = function (spec) { sim.pillSpec = normSpec(spec); sim.pillType = makePillType(sim.pillSpec); return sim.pillType; };
     sim.setPillSpec(opts.pill || {});
     sim.bodies = newBodies();
-    sim.reset = function (clearFoam) { sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; if (clearFoam) sim.resetFoam(); };
+    sim.reset = function (clearFoam) { sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; sim.stats.escaped = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); sim.cells.dust[b].fill(0); } sim.wearT = 0; };
     { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; }   // pills leave the model 5 mm below the lowest shell surface
     sim.dustFx = { cap: 20000, head: 0, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000) };
@@ -1131,15 +1132,21 @@ body.nonotes aside small{display:none}
   }
   function newSensor(o) { return Object.assign({ on: true, below_mm: 15, side_mm: 0, axis: 'frontback', beam_mm: 1, half_mm: 15, response_ms: 0.5, min_block_ms: 1, count_on: 'break' }, o || {}, { raw: false, out: false, q: [], blk: false, armed: false, tOn: 0, count: 0, times: [] }); }
   function newCtrl(o) {
-    const c = Object.assign({ mode: 'continuous', rpmRun: 12, ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_open_on: 'count', gate_hold_ms: 1000 }, o || {});
+    const c = Object.assign({ mode: 'continuous', rpmRun: 12, ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 250, gate_wait_s: 3, wait_gate: true }, o || {});
     c.sensors = ((o && o.sensors) || [{}]).map(newSensor);
-    return Object.assign(c, { gTrig: false, gUntil: 0, state: 'idle', queue: 0, needs: [], tNext: 0, tStop: 0, cur: null, feeds: [], mRpm: 0, lash: null });
+    return Object.assign(c, { held: 0, extra: 0, leaks: 0, exitN: 0, outN: 0, tExit: -1e9, tOut: -1e9, gWant: false, gClr: -1, gMiss: 0, state: 'idle', queue: 0, needs: [], tNext: 0, tStop: 0, cur: null, feeds: [], mRpm: 0, lash: null });
   }
   function pillEvent(sim, C, k) {
     const sn = C.sensors[k], now = sim.t; sn.count++; sn.times.push(now); if (sn.times.length > 2000) sn.times.shift();
-    if (k !== C.trigger || C.mode !== 'feed') return;
+    if ((sn.zone || 'exit') === 'gate') { C.tOut = now; if (C.outN >= C.exitN && C.held > 0) { C.held--; C.leaks++; } else C.outN++; }   // a pill has left the assembly (a held extra slipping through the closing gate is a leak)
+    if (k !== C.trigger) return;
+    C.tExit = now;
+    // a pill that comes off the conveyor while the gate is shut was not called (overfeed): the closed gate holds it, and
+    // it is released as the next called dose instead of going downstream on its own
+    if (sim.gate && C.mode === 'feed' && !C.gWant) { C.held++; C.extra++; return; }
+    C.exitN++;   // heading for the open gate; the Out sensor must see it leave
+    if (C.mode !== 'feed') return;
     if (C.cur) { C.cur.n++; C.cur.times.push(now); C.cur.tLast = now; }
-    C.gTrig = true; C.gUntil = Math.max(C.gUntil, now + C.gate_hold_ms * 1e-3);   // gate opens as the counted pill heads for it
     if (C.state === 'feeding' && C.cur.n >= (C.cur.need || 1)) { C.state = 'stopping'; C.tStop = now + C.stop_delay_ms * 1e-3; C.cur.tDet = now; }   // a feed of N pills runs on until the N-th is counted
   }
   function ctrlStep(sim, dt) {
@@ -1155,7 +1162,9 @@ body.nonotes aside small{display:none}
       if (sn.blk && !sn.armed && now - sn.tOn >= sn.min_block_ms * 1e-3 - 1e-12) { sn.armed = true; if (sn.count_on !== 'clear') pillEvent(sim, C, k); }
     }
     if (C.mode !== 'feed') return;
-    if (C.state === 'idle' && C.queue > 0 && now >= C.tNext) { C.queue--; C.state = 'feeding'; C.cur = { t0: now, tLast: now, need: Math.max(1, Math.round(C.needs.length ? C.needs.shift() : (C.pills_per_feed || 1))), n: 0, tDet: -1, tStop: -1, timeout: false, times: [] }; C.feeds.push(C.cur); if (C.feeds.length > 5000) C.feeds.shift(); C.gTrig = C.gate_open_on === 'start' || C.cur.need > 1; }
+    if (C.state === 'idle' && C.queue > 0 && now >= C.tNext) { C.queue--; C.state = 'feeding'; C.cur = { t0: now, tLast: now, need: Math.max(1, Math.round(C.needs.length ? C.needs.shift() : (C.pills_per_feed || 1))), n: 0, tDet: -1, tStop: -1, timeout: false, times: [] }; C.feeds.push(C.cur); if (C.feeds.length > 5000) C.feeds.shift();
+      if (C.held > 0) { const h = Math.min(C.held, C.cur.need); C.held -= h; C.exitN += h; C.cur.n += h; C.cur.fromHeld = h; C.cur.tLast = now; C.gWant = true;   // held pill(s) on the gate are this dose
+        if (C.cur.n >= C.cur.need) { C.state = 'idle'; C.cur.tDet = now; C.cur.tStop = now; C.tNext = now + C.gap_ms * 1e-3; } } }
     if (C.state === 'feeding' && now - C.cur.tLast > C.timeout_s) {   // timeout counts from the start or the last pill counted
       C.cur.timeout = true; C.state = 'idle'; C.cur.tStop = now; C.tNext = now + C.gap_ms * 1e-3; }
     if (C.state === 'stopping' && now >= C.tStop) {
@@ -1164,8 +1173,20 @@ body.nonotes aside small{display:none}
     }
     // backup: belt surface travel measured from the furthest forward point (the forward run coasts down first);
     // the reverse is cut early by its own ramp-down distance so the total reverse travel lands on backup_mm
-    // gate (normally closed): open from the trigger (pill counted, or feed start / multi-pill) while the feed runs, then hold_ms more
-    if (sim.gate) { if (C.gTrig && C.state !== 'idle') C.gUntil = Math.max(C.gUntil, now + C.gate_hold_ms * 1e-3); if (C.state === 'idle') C.gTrig = false; sim.gate.open = now < C.gUntil; }
+    // gate (normally closed): opens the moment a pill is called (feed start) and stays open while the feed runs and until
+    // the Out sensor (under the gate) has seen every pill the exit sensor counted leave, its beam is clear again, and the
+    // close delay has passed. Safety fallback: if a counted pill never reaches the Out sensor (stuck, or two pills fell
+    // through as one beam break) the gate closes gate_wait_s after the last sensor activity and the miss is logged.
+    // With the Out sensor switched off the gate falls back to closing gate_wait_s after the feed ends.
+    if (sim.gate) {
+      const ok = C.sensors.findIndex(x => x.on && (x.zone || 'exit') === 'gate'), so = ok >= 0 ? C.sensors[ok] : null;
+      const running = C.state !== 'idle', pending = so ? C.exitN > C.outN : false, beam = so ? so.out : false;
+      if (running || pending || beam || (!so && now - C.tExit < C.gate_wait_s)) { C.gWant = true; C.gClr = -1; }
+      else if (C.gWant) { if (C.gClr < 0) C.gClr = now; if (now - C.gClr >= C.gate_close_ms * 1e-3) C.gWant = false; }
+      const last = Math.max(C.tExit, C.tOut, C.cur ? C.cur.tStop : -1e9);
+      if (C.gWant && !running && pending && now - last > C.gate_wait_s) { C.gMiss += pending ? C.exitN - C.outN : 0; C.outN = C.exitN; C.gWant = false; }
+      sim.gate.open = C.gWant;
+    }
     const kRpm = 60 / (TAU * P.driveRadius), rpmB = C.backup_mm_s * 1e-3 * kRpm, sgnF = C.rpmRun < 0 ? -1 : 1, rate = Math.max(Math.abs(C.rpmRun), C.backup ? rpmB : 0) / Math.max(C.ramp_ms * 1e-3, 1e-9);
     if (C.state === 'backup') {
       if ((sim.S - C.Spk) * sgnF > 0) C.Spk = sim.S; const back = (C.Spk - sim.S) * sgnF; C.cur.backed = back;
@@ -1173,7 +1194,9 @@ body.nonotes aside small{display:none}
       if (!C.bStop && P.rpm * sgnF <= 0 && back >= C.backup_mm * 1e-3 - stopDist) C.bStop = true;
       if (C.bStop && C.mRpm === 0 && P.rpm === 0) { C.state = 'idle'; C.cur.tStop = now; C.tNext = now + C.gap_ms * 1e-3; }
     }
-    const run = C.state === 'feeding' || C.state === 'stopping' || C.state === 'backup', tgt = C.state === 'backup' ? (C.bStop ? 0 : -sgnF * rpmB) : run ? C.rpmRun : 0;
+    // a called feed holds the belts (and vibrator) until the gate is fully open, so the pill never meets a half-open gate
+    const gHold = C.state === 'feeding' && C.wait_gate && sim.gate && (sim.gate.ang < sim.gate.travel - 1e-6 && !sim.gate.stall);
+    const run = !gHold && (C.state === 'feeding' || C.state === 'stopping' || C.state === 'backup'), tgt = C.state === 'backup' ? (C.bStop ? 0 : -sgnF * rpmB) : run ? C.rpmRun : 0;
     if (C.ramp_ms > 0) { const dr = rate * dt; C.mRpm += Math.max(-dr, Math.min(dr, tgt - C.mRpm)); if (Math.abs(C.mRpm) < 1e-9) C.mRpm = 0; } else C.mRpm = tgt;
     // gear backlash (worm 20:1 + belt pulley), lumped at the output shaft: the motor turns freely through the play
     // after a reversal before the teeth re-engage and the belts / cams move. lash = position inside the play window.
@@ -1438,7 +1461,7 @@ body.nonotes aside small{display:none}
       if (B.exitT[i] < 0 && u - sim.U0 < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 + 0.47 * Math.min(0, u - sim.U0 + sim.Rb + P.thickness) && v < sim.W + 3e-3) {
         B.exitT[i] = sim.t; sim.stats.exits.push({ t: sim.t, id: B.id[i], x }); sim.stats.dispensed++;
       }
-      if (B.pz[i] < (sim.floorZ ?? 0) || B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } else sim.stats.delivered = (sim.stats.delivered || 0) + 1; }
+      if (B.pz[i] < (sim.floorZ ?? 0) || B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } else if (!sim.gate || (B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3)) sim.stats.delivered = (sim.stats.delivered || 0) + 1; else { sim.stats.escaped = (sim.stats.escaped || 0) + 1; (sim.stats.escLog || (sim.stats.escLog = [])).push([sim.t, B.id[i], B.px[i] * 1e3, B.py[i] * 1e3]); } }   // past the belts: down the drop hole = delivered; anywhere else (e.g. knocked out of the open front by the gate) = escaped
     }
     sim.t += dt; sim.steps++; sim.wearT += dt;
     // pill loads. Squeeze = compressive part of the contact normal forces: (sum |F_n| - |sum F_n|) / 2 -- for a pill
@@ -1929,32 +1952,32 @@ body.nonotes aside small{display:none}
   $('geoReset').onclick = () => { S.geom = { bot: 0, top: 0, W: 8 }; syncUI(); applyGeom(); };
 
   /* ---- sensors + feed control (engine: newCtrl / ctrlStep) */
-  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 1, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_open_on: 'count', gate_hold_ms: 1000, gate_travel_deg: null, gate_speed: 0.10, n: 1, sel: 1,
+  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 1, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 250, gate_wait_s: 3, wait_gate: true, gate_travel_deg: null, gate_speed: 0.10, n: 1, sel: 1,
     sensors: [{ on: true, zone: 'entry', pos_mm: 0 }, { on: true, zone: 'exit', below_mm: 15 }, { on: true, zone: 'gate', pos_mm: 4 }].map(o => Object.assign({ side_mm: 0, axis: 'frontback', beam_mm: 1, response_ms: 0.5, min_block_ms: 1, count_on: 'break' }, o)) }; }
   function ctS() { if (!S.ctrl || !Array.isArray(S.ctrl.sensors)) S.ctrl = CT_DEF(); if (S.ctrl.sensors.length && !S.ctrl.sensors[0].zone) { const o = S.ctrl.sensors[0]; S.ctrl.sensors = []; S.ctrl.trigger = 1; S.ctrl.sel = 1; S.ctrl._old = o; } const d = CT_DEF(); for (const k in d) if (S.ctrl[k] == null) S.ctrl[k] = d[k]; S.ctrl.sensors = d.sensors.map((x, i) => Object.assign(x, S.ctrl.sensors[i] || {})); if (S.ctrl._old) { for (const k of ['below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'count_on']) if (S.ctrl._old[k] != null) S.ctrl.sensors[1][k] = S.ctrl._old[k]; delete S.ctrl._old; } return S.ctrl; }
   function applyCtrl() {
     if (!sim) return; const c = ctS();
     if (!sim.ctrl) { sim.ctrl = FFx.newCtrl({ trigger: c.trigger, sensors: c.sensors.map(x => Object.assign({}, x)) }); }
     const C = sim.ctrl, was = C.mode;
-    for (const k of ['ramp_ms', 'stop_delay_ms', 'timeout_s', 'gap_ms', 'vib_with_motor', 'trigger', 'backup', 'backup_mm', 'backup_mm_s', 'backlash_deg', 'gate_open_on', 'gate_hold_ms']) C[k] = c[k];
+    for (const k of ['ramp_ms', 'stop_delay_ms', 'timeout_s', 'gap_ms', 'vib_with_motor', 'trigger', 'backup', 'backup_mm', 'backup_mm_s', 'backlash_deg', 'gate_close_ms', 'gate_wait_s', 'wait_gate']) C[k] = c[k];
     if (sim.gate) { if (c.gate_travel_deg == null) c.gate_travel_deg = +(sim.gate.travel * 180 / PI).toFixed(1); sim.gate.travel = c.gate_travel_deg * PI / 180; sim.gate.speed = c.gate_speed; }
     c.sensors.forEach((x, i) => { for (const k of ['on', 'zone', 'pos_mm', 'below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'count_on']) C.sensors[i][k] = x[k]; });
     C.mode = c.mode; C.rpmRun = S.rpm;
-    if (c.mode === 'feed' && was !== 'feed') { C.gTrig = false; C.gUntil = 0; C.state = 'idle'; C.queue = 0; sim.P.rpm = 0; C.mRpm = 0; C.lash = null; sim.vibEnv = 0; }
+    if (c.mode === 'feed' && was !== 'feed') { C.gWant = false; C.outN = C.exitN; C.held = 0; C.state = 'idle'; C.queue = 0; sim.P.rpm = 0; C.mRpm = 0; C.lash = null; sim.vibEnv = 0; }
     if (c.mode !== 'feed') { C.state = 'idle'; C.queue = 0; sim.P.rpm = S.rpm; sim.vibEnv = null; }
   }
   function syncCtrlUI() {
     const c = ctS(), sn = c.sensors[c.sel];
     $('ctMode').value = c.mode; $('ctN').value = c.n; $('ctVib').checked = !!c.vib_with_motor; $('snSel').value = c.sel;
-    $('ctBack').checked = !!c.backup; $('gtOn').value = c.gate_open_on; for (const [id, v] of [['gtHold', c.gate_hold_ms], ['gtTrav', c.gate_travel_deg ?? 77.2], ['gtSpd', c.gate_speed], ['ctBackMm', c.backup_mm], ['ctBackV', c.backup_mm_s], ['ctLash', c.backlash_deg], ['ctDelay', c.stop_delay_ms], ['ctRamp', c.ramp_ms], ['ctTimeout', c.timeout_s], ['ctGap', c.gap_ms], ['snSide', sn.side_mm], ['snBeam', sn.beam_mm], ['snResp', sn.response_ms], ['snMin', sn.min_block_ms]]) { $(id).value = v; $(id + 'V').textContent = v; }
+    $('ctBack').checked = !!c.backup; $('gtWaitOpen').checked = c.wait_gate !== false; for (const [id, v] of [['gtClose', c.gate_close_ms], ['gtWait', c.gate_wait_s], ['gtTrav', c.gate_travel_deg ?? 77.2], ['gtSpd', c.gate_speed], ['ctBackMm', c.backup_mm], ['ctBackV', c.backup_mm_s], ['ctLash', c.backlash_deg], ['ctDelay', c.stop_delay_ms], ['ctRamp', c.ramp_ms], ['ctTimeout', c.timeout_s], ['ctGap', c.gap_ms], ['snSide', sn.side_mm], ['snBeam', sn.beam_mm], ['snResp', sn.response_ms], ['snMin', sn.min_block_ms]]) { $(id).value = v; $(id + 'V').textContent = v; }
     { const z = sn.zone || 'exit', e = $('snBelow'), R = z === 'entry' ? [-10, 20, 0.5] : z === 'gate' ? [1, 7, 0.5] : [5, 40, 0.5], v = z === 'exit' ? sn.below_mm : (sn.pos_mm ?? (z === 'gate' ? 4 : 0));
       e.min = R[0]; e.max = R[1]; e.step = R[2]; e.value = v; $('snBelowV').textContent = v; $('snBelowL').textContent = z === 'entry' ? 'Position (above top idler)' : z === 'gate' ? 'Position (below gate)' : 'Position (down chute)'; }
     $('snOn').checked = !!sn.on; $('snTrig').checked = c.trigger === c.sel; $('snAxis').value = sn.axis; $('snEdge').value = sn.count_on;
     $('btnFeedStop').disabled = c.mode !== 'feed';
     backUI();
   }
-  $('gtOn').onchange = () => { ctS().gate_open_on = $('gtOn').value; applyCtrl(); };
-  for (const [id, k] of [['gtHold', 'gate_hold_ms'], ['gtTrav', 'gate_travel_deg'], ['gtSpd', 'gate_speed']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
+  $('gtWaitOpen').onchange = () => { ctS().wait_gate = $('gtWaitOpen').checked; applyCtrl(); };
+  for (const [id, k] of [['gtClose', 'gate_close_ms'], ['gtWait', 'gate_wait_s'], ['gtTrav', 'gate_travel_deg'], ['gtSpd', 'gate_speed']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
   $('ctBack').onchange = () => { ctS().backup = $('ctBack').checked; applyCtrl(); };
   for (const [id, k] of [['ctBackMm', 'backup_mm'], ['ctBackV', 'backup_mm_s'], ['ctLash', 'backlash_deg'], ['ctDelay', 'stop_delay_ms'], ['ctRamp', 'ramp_ms'], ['ctTimeout', 'timeout_s'], ['ctGap', 'gap_ms']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
   hook('snBelow', v => { const c = ctS(), x = c.sensors[c.sel]; x[(x.zone || 'exit') === 'exit' ? 'below_mm' : 'pos_mm'] = +v; applyCtrl(); });
@@ -1976,15 +1999,15 @@ body.nonotes aside small{display:none}
   $('btnFeedStop').onclick = () => { const C = sim.ctrl; if (!C) return; C.queue = 0; C.needs.length = 0; if (C.state !== 'idle') { C.state = 'idle'; if (C.cur) { C.cur.tStop = sim.t; C.cur.aborted = true; } C.tNext = sim.t; } };
   function ctrlReadouts() {
     const C = sim.ctrl; if (!C) return; const P = sim.P;
-    $('r_ct').textContent = C.mode !== 'feed' ? 'continuous · belts running' : C.state === 'feeding' ? `FEEDING ${fmt(sim.t - C.cur.t0, 1)} s · ${fmt(Math.abs(P.rpm), 0)} rpm${C.queue ? ' · ' + C.queue + ' queued' : ''}` : C.state === 'stopping' ? 'pill seen — stopping' : C.state === 'backup' ? `backing up ${fmt((C.cur && C.cur.backed || 0) * 1e3, 1)} / ${fmt(C.backup_mm, 1)} mm` : `stopped${C.queue ? ' · next in ' + fmt(Math.max(0, C.tNext - sim.t), 1) + ' s (' + C.queue + ' queued)' : ' · ready'}${P.rpm !== 0 ? ' (ramping down)' : ''}`;
+    $('r_ct').textContent = C.mode !== 'feed' ? 'continuous · belts running' : C.state === 'feeding' && sim.gate && C.wait_gate && sim.P.rpm === 0 && sim.gate.ang < sim.gate.travel - 1e-6 && !sim.gate.stall ? 'opening gate — belts start when open' : C.state === 'feeding' ? `FEEDING ${fmt(sim.t - C.cur.t0, 1)} s · ${fmt(Math.abs(P.rpm), 0)} rpm${C.queue ? ' · ' + C.queue + ' queued' : ''}` : C.state === 'stopping' ? 'pill seen — stopping' : C.state === 'backup' ? `backing up ${fmt((C.cur && C.cur.backed || 0) * 1e3, 1)} / ${fmt(C.backup_mm, 1)} mm` : `stopped${C.queue ? ' · next in ' + fmt(Math.max(0, C.tNext - sim.t), 1) + ' s (' + C.queue + ' queued)' : ' · ready'}${P.rpm !== 0 ? ' (ramping down)' : ''}`;
     $('r_ct').style.color = C.state === 'feeding' ? '#7d9' : C.state === 'stopping' || C.state === 'backup' ? '#fc6' : '';
     { const nm = { entry: 'Entry', exit: 'Exit', gate: 'Out' }; $('r_sens').textContent = C.sensors.map((x, i) => x.on ? `${nm[x.zone] || 'S' + (i + 1)}${i === C.trigger ? '*' : ''} ${x.out ? '■' : '□'} ${x.count}` : null).filter(Boolean).join(' · ') || 'none on'; }
     if (sim.gate) { const g = sim.gate, L = g.link, s_ = g.off * 1e3, deg = g.ang * 180 / PI, mov = Math.abs(g.vel) > 1e-5, cl = FFx.gateStroke(g, g.travel) < L.clear;
       let onG = 0; const Bb = sim.bodies; for (let i = 0; i < Bb.n; i++) if (Bb.alive[i] && Bb.exitT[i] >= 0) onG++;
-      $('r_gate').textContent = (g.stall ? 'STALLED on back wall · ' : mov ? (g.open ? 'opening · ' : 'closing · ') : g.ang < 1e-4 ? 'closed · ' : g.open ? 'open · ' : '') + `${fmt(deg, 0)}° · ${fmt(s_, 1)} mm` + (onG ? ` · ${onG} pill${onG === 1 ? '' : 's'} below belts` : '') + (cl && g.open && !mov ? ' · hole not fully clear' : '') + ` · ${sim.stats.delivered || 0} delivered`;
+      $('r_gate').textContent = (g.stall ? 'STALLED on back wall · ' : mov ? (g.open ? 'opening · ' : 'closing · ') : g.ang < 1e-4 ? 'closed · ' : g.open ? 'open · ' : '') + `${fmt(deg, 0)}° · ${fmt(s_, 1)} mm` + (onG ? ` · ${onG} pill${onG === 1 ? '' : 's'} below belts` : '') + (cl && g.open && !mov ? ' · hole not fully clear' : '') + ` · ${sim.stats.delivered || 0} delivered` + (sim.stats.escaped ? ` · ${sim.stats.escaped} knocked out (not via hole)` : '') + (C.mode === 'feed' && C.exitN > C.outN ? ` · waiting for ${C.exitN - C.outN} at Out` : '') + (C.gMiss ? ` · ${C.gMiss} missed by Out` : '') + (C.held ? ` · ${C.held} extra held on gate (next dose)` : '') + (C.leaks ? ` · ${C.leaks} slipped past closing gate` : '');
       $('r_gate').style.color = g.stall ? '#f66' : (cl && g.open && !mov) ? '#fc6' : g.ang > 1e-4 ? '#7d9' : ''; }
     const fs = FFx.feedStats(sim), f = C.feeds[C.feeds.length - 1];
-    $('r_feed').textContent = !f ? '—' : f.timeout ? (f.n ? `${f.n} of ${f.need} — then no pill in ${fmt(C.timeout_s, 0)} s (timeout)` : `no pill in ${fmt(C.timeout_s, 0)} s (timeout)`) : f.aborted ? 'stopped by hand' : f.tDet < 0 ? (f.need > 1 ? `counting… ${f.n} of ${f.need}` : 'waiting for a pill…') : (f.need > 1 ? `${f.n} of ${f.need} pills · ${fmt(f.tDet - f.t0, 2)} s` : `${f.n} pill${f.n === 1 ? '' : 's'} · ${fmt(f.tDet - f.t0, 2)} s to the sensor`);
+    $('r_feed').textContent = !f ? '—' : f.timeout ? (f.n ? `${f.n} of ${f.need} — then no pill in ${fmt(C.timeout_s, 0)} s (timeout)` : `no pill in ${fmt(C.timeout_s, 0)} s (timeout)`) : f.aborted ? 'stopped by hand' : f.fromHeld && f.tDet === f.t0 ? `released ${f.fromHeld} held pill${f.fromHeld > 1 ? 's' : ''} from the gate` : f.tDet < 0 ? (f.need > 1 ? `counting… ${f.n} of ${f.need}` : 'waiting for a pill…') : (f.need > 1 ? `${f.n} of ${f.need} pills · ${fmt(f.tDet - f.t0, 2)} s` : `${f.n} pill${f.n === 1 ? '' : 's'} · ${fmt(f.tDet - f.t0, 2)} s to the sensor`);
     $('r_feed').style.color = f && (f.n > (f.need || 1) || f.timeout) ? '#f66' : '';
     $('r_feeds').textContent = fs && fs.feeds ? `${fs.feeds} done: ${fs.singles} exact · ${fs.doubles} extra pill · ${fs.empties + (fs.short || 0)} short/empty` : '—';
     $('r_ttp').textContent = fs && fs.time_to_pill_mean_s != null ? `${fmt(fs.time_to_pill_mean_s, 2)} s mean${fs.time_to_pill_sd_s != null ? ' ± ' + fmt(fs.time_to_pill_sd_s, 2) : ''} · max ${fmt(fs.time_to_pill_max_s, 2)} s` : '—';
@@ -2439,7 +2462,7 @@ body.nonotes aside small{display:none}
   }
   group('Pills', 'Surface & physics (density, friction, bounce)', 'pDen', 'pRest');
   group('Sensors & feed control', 'Feed timing (stop delay, ramp, backlash, timeout, gap)', 'ctDelay', 'ctVib');
-  group('Sensors & feed control', 'Gate (servo slide gate)', 'gtOn', 'r_gate');
+  group('Sensors & feed control', 'Gate (servo slide gate)', 'gtWaitOpen', 'r_gate');
   group('Sensors & feed control', 'Sensor setup (S1–S3: position, beam, timing)', 'snSel', 'snEdge');
   // toolbar: search + expand/collapse + notes
   const left = document.querySelector('#app > aside:not(.r)'), bar = document.createElement('div'); bar.id = 'uiTools';
