@@ -101,6 +101,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="row" id="rowEdge"><label>Edge roundness</label><input type="range" id="pEdge" min="0.2" max="1" step="0.05"><span class="v"><span id="pEdgeV"></span></span></div>
 <div class="row"><label for="pMat" title="sets friability (dust) and surface tack defaults">Material</label><select id="pMat" style="grid-column:2/4"><option value="pressed">Pressed tablet / caplet</option><option value="coated">Film-coated tablet</option><option value="gelcap">Hard gelatin capsule (gel cap)</option><option value="softgel">Soft gelatin (softgel)</option></select></div>
 <div class="row"><label for="pFri" title="mass lost in the USP <1216> friability test (100 drops from 156 mm). Pressed tablets typically 0.1-0.8 % (limit 1 %); film-coated ~0.1 %; gelatin 0. Drives dust generation">Friability</label><input type="range" id="pFri" min="0" max="2" step="0.05" value="0.5"><span class="v"><span id="pFriV"></span> %</span></div>
+<div class="row"><label for="pTack" title="effective work of adhesion of the pill surface (J/m²). Every touching contact needs the JKR pull-off force 1.5·π·W·R to separate. Pressed/coated tablets ~0; clean dry gelatin ~0.1; gel cap 0.2 and softgel 0.3 are estimates for room humidity (rise steeply when humid) - calibrate with a measured pull-off force">Tack</label><input type="range" id="pTack" min="0" max="3" step="0.05" value="0"><span class="v"><span id="pTackV"></span> J/m²</span></div>
 <div class="row"><label for="pDen" title="">Density</label><input type="range" id="pDen" min="800" max="2500" step="25" value="1300"><span class="v"><span id="pDenV"></span> kg/m³</span></div>
 <div class="row"><label for="pMuF" title="base coefficient; the foam grip factor and squeeze multiply it">Friction vs foam</label><input type="range" id="pMuF" min="0.05" max="2" step="0.05" value="0.6"><span class="v"><span id="pMuFV"></span></span></div>
 <div class="row"><label for="pMuH" title="pill-pill and pill-hopper friction">Friction vs hard</label><input type="range" id="pMuH" min="0.05" max="1" step="0.05" value="0.35"><span class="v"><span id="pMuHV"></span></span></div>
@@ -135,6 +136,9 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="row"><label for="dustShow" title="draw the dust as it is shed (1 speck per 100 ng); specks drift down and fade over a few seconds">Show dust</label><input type="checkbox" id="dustShow" checked style="justify-self:start"></div>
 <small>Abrasion + chipping: mass shed in proportion to the energy dissipated at each pill's contacts, calibrated to the pill's friability (USP 1216 drum test). Gelatin capsules and softgels shed none. Dust does not yet change friction.</small>
 <div class="btns"><button id="btnDust">Reset dust</button></div>
+<h2>Tack</h2>
+<div class="kv"><b>Pill tack</b><span id="r_tk"></span><b>Bond number</b><span id="r_bond"></span><b>Held &gt; weight</b><span id="r_cling"></span><b>Strongest hold</b><span id="r_tkMax"></span></div>
+<small>Bond number = pull-off force of one contact ÷ pill weight: below ~0.1 pills flow freely, above 1 they behave cohesively (clump, cling to walls, bridge the throat). "Held &gt; weight" counts pills whose total tack force right now exceeds their own weight. Tack also raises friction, since it presses the surfaces together.</small>
 <h2>View</h2>
 <div class="row"><label>Hopper opacity</label><input type="range" id="hopA" min="0" max="1" step="0.02" value="0.22"><span class="v"></span></div>
 <div class="row"><label><input type="checkbox" id="secOn"> Section cut</label><input type="range" id="secX" min="0" max="46" step="0.5" value="22.5"><span class="v"><span id="secXV">22.5</span></span></div>
@@ -251,10 +255,13 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     }
   }
   /* Pill materials. fri = friability (fraction of mass lost in the USP <1216> drum test: 100 drops from 156 mm; pressed
-     tablets typically 0.1-0.8 %, spec limit 1 %). Gelatin shells do not powder: 0. tack = pull-off stress of the surface
-     (Pa) -- pressed tablets ~0; gelatin is tacky, more so for soft gels and in humid air (estimates: measure with a
-     probe-tack test for real numbers). */
-  const PILL_MATS = { pressed: { fri: 0.005, tack: 0, label: 'Pressed tablet / caplet' }, gelcap: { fri: 0, tack: 2000, label: 'Hard gelatin capsule (gel cap)' }, softgel: { fri: 0, tack: 6000, label: 'Soft gelatin (softgel)' }, coated: { fri: 0.001, tack: 0, label: 'Film-coated tablet' } };
+     tablets typically 0.1-0.8 %, spec limit 1 %). Gelatin shells do not powder: 0. tack = effective work of adhesion
+     W (J/m^2) of the pill surface. Each touching sphere pair then needs the JKR pull-off force 1.5 pi W R* to separate
+     (R* = reduced radius; R* = sphere radius against a wall, glass or foam), independent of the contact stiffness.
+     Pressed / coated tablets: rough and dry, ~0. Gelatin: clean dry gelatin has W ~0.1 (2 x surface energy ~0.05);
+     estimates for room humidity -- gel cap 0.2 (one contact holds ~0.5x the weight of a 19 x 7.5 gel cap), softgel 0.3
+     (~1x the weight of a 14 x 8 softgel: cohesive); both rise steeply in humid air. Calibrate with a measured pull-off. */
+  const PILL_MATS = { pressed: { fri: 0.005, tack: 0, label: 'Pressed tablet / caplet' }, gelcap: { fri: 0, tack: 0.2, label: 'Hard gelatin capsule (gel cap)' }, softgel: { fri: 0, tack: 0.3, label: 'Soft gelatin (softgel)' }, coated: { fri: 0.001, tack: 0, label: 'Film-coated tablet' } };
   function normSpec(s) {
     const o = Object.assign({ shape: 'tablet', L: 10, W: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35, mat: 'pressed' }, s);
     const M = PILL_MATS[o.mat] || PILL_MATS.pressed; if (o.fri == null) o.fri = M.fri; if (o.tack == null) o.tack = M.tack;
@@ -740,7 +747,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       type: [], alive: new Uint8Array(cap), nc: new Uint16Array(cap), ncp: new Uint16Array(cap), id: new Int32Array(cap), exitT: new Float64Array(cap).fill(-1), hue: new Float32Array(cap), seq: 0,
       // contact load bookkeeping (normal forces only): per-step sums, then filtered squeeze / pressure and their run peaks
       lS: new Float64Array(cap), lX: new Float64Array(cap), lY: new Float64Array(cap), lZ: new Float64Array(cap), pM: new Float64Array(cap),
-      dm: new Float64Array(cap), sq: new Float64Array(cap), sqPk: new Float64Array(cap), pr: new Float64Array(cap), prPk: new Float64Array(cap), xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9) };
+      dm: new Float64Array(cap), aS: new Float64Array(cap), aF: new Float64Array(cap), sq: new Float64Array(cap), sqPk: new Float64Array(cap), pr: new Float64Array(cap), prPk: new Float64Array(cap), xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9) };
   }
 
   function addPills(sim, n, region) {
@@ -1005,6 +1012,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       Fx = Fn * fnx + ftx; Fy = Fn * fny + fty; Fz = Fn * fnz + ftz;
       Tx = cy * Fz - cz * Fy; Ty = cz * Fx - cx * Fz; Tz = cx * Fy - cy * Fx;
     }
+    if (T.spec.tack > 0) { const Fa = 1.5 * PI * T.spec.tack * rs; B.aS[bi] += Fa; Fx -= Fa * nx; Fy -= Fa * ny; Fz -= Fa * nz; Tx -= cy * Fa * nz - cz * Fa * ny; Ty -= cz * Fa * nx - cx * Fa * nz; Tz -= cx * Fa * ny - cy * Fa * nx; }
     B.fx[bi] += Fx; B.fy[bi] += Fy; B.fz[bi] += Fz;
     { const nX = Fx - ftx, nY = Fy - fty, nZ = Fz - ftz; B.lS[bi] += Math.hypot(nX, nY, nZ); B.lX[bi] += nX; B.lY[bi] += nY; B.lZ[bi] += nZ; if (pMax > B.pM[bi]) B.pM[bi] = pMax; }
     const wn = B.wx[bi] * nx + B.wy[bi] * ny + B.wz[bi] * nz;
@@ -1025,6 +1033,9 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
      where: 0 = on the belt foam (stored per belt cell), 1 = pill-on-pill (loose in the pile), 2 = on walls / plate / glass. */
   // x0.84: the contact model's counted dissipation runs ~20 % above the true energy loss (slip work includes the
   // tangential spring's elastic recoil); this factor makes a simulated 156 mm drop onto a hard floor reproduce fri/100.
+  // Adhesion acts while surfaces touch and across a 20 um capture gap (the stretched tacky neck before it snaps) so a
+  // resting pill does not lose its grip to numerical micro-bounce. Separation work = pull-off force x ~20 um.
+  const ADH_RANGE = 2e-5;
   const DUST_KAPPA = 0.84 / (100 * 9.81 * 0.156);
   function addDust(sim, B, i, E, x, y, z, where, belt, cell) {
     const fri = B.type[i].spec.fri; if (!(fri > 0)) return;
@@ -1075,31 +1086,43 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
         ns++;
       }
       B.fx[i] = g[0] * T.mass; B.fy[i] = g[1] * T.mass; B.fz[i] = g[2] * T.mass; B.tx[i] = B.ty[i] = B.tz[i] = 0;
-      B.ncp[i] = Math.max(1, B.nc[i]); B.nc[i] = 0; B.lS[i] = B.lX[i] = B.lY[i] = B.lZ[i] = B.pM[i] = 0;   // contacts last step: each contact's 'stop the slip' cap is shared between them
+      B.ncp[i] = Math.max(1, B.nc[i]); B.nc[i] = 0; B.lS[i] = B.lX[i] = B.lY[i] = B.lZ[i] = B.pM[i] = 0; B.aF[i] = B.aS[i]; B.aS[i] = 0;   // contacts last step: each contact's 'stop the slip' cap is shared between them
     }
     sim.nSpheres = ns;
-    let dustOn = false; for (let i = 0; i < n && !dustOn; i++) if (B.alive[i] && B.type[i].spec.fri > 0) dustOn = true;
+    let dustOn = false, tackOn = false; for (let i = 0; i < n; i++) if (B.alive[i]) { if (B.type[i].spec.fri > 0) dustOn = true; if (B.type[i].spec.tack > 0) tackOn = true; }
     sim.stats.meanEps = 0; sim.stats.contacts = 0; sim.stats.maxEps = 0; sim.stats.powerAcc = 0;
     if (ns > 1) {
       // broad phase on whole pills (sweep-and-prune on bounding spheres), then sphere pairs only between pills that
       // can touch; each pill's spheres are contiguous in _s*, so pair (k in i, m in j) keeps k < m and i < j
-      let nb = 0;
-      for (let i = 0; i < n; i++) if (B.alive[i]) { _bo[nb] = i; _bx[i] = B.px[i] - B.type[i].brad; nb++; }
+      let nb = 0; const pad = tackOn ? ADH_RANGE : 0;   // tack capture gap widens the broad phase
+      for (let i = 0; i < n; i++) if (B.alive[i]) { _bo[nb] = i; _bx[i] = B.px[i] - B.type[i].brad - pad; nb++; }
       const ord = _bo.subarray(0, nb); ord.sort((p_, q_) => _bx[p_] - _bx[q_]);
       for (let oi = 0; oi < nb; oi++) {
-        const bi0 = ord[oi], Ri = B.type[bi0].brad, xi1 = B.px[bi0] + Ri;
+        const bi0 = ord[oi], Ri = B.type[bi0].brad + pad, xi1 = B.px[bi0] + Ri;
         for (let oj = oi + 1; oj < nb; oj++) {
           const bj0 = ord[oj]; if (_bx[bj0] > xi1) break;
-          const Rj = B.type[bj0].brad, ex = B.px[bi0] - B.px[bj0], ey = B.py[bi0] - B.py[bj0], ez = B.pz[bi0] - B.pz[bj0], RR = Ri + Rj;
+          const Rj = B.type[bj0].brad + pad, ex = B.px[bi0] - B.px[bj0], ey = B.py[bi0] - B.py[bj0], ez = B.pz[bi0] - B.pz[bj0], RR = Ri + Rj;
           if (ex * ex + ey * ey + ez * ez >= RR * RR) continue;
           const lo = bi0 < bj0 ? bi0 : bj0, hi = bi0 < bj0 ? bj0 : bi0, cxh = B.px[hi], cyh = B.py[hi], czh = B.pz[hi], Rh = B.type[hi].brad;
           for (let k = _bst[lo], ke = _bst[lo] + _bns[lo]; k < ke; k++) {
-            const qx = _sx[k] - cxh, qy = _sy[k] - cyh, qz = _sz[k] - czh, rq = _sr[k] + Rh;
+            const qx = _sx[k] - cxh, qy = _sy[k] - cyh, qz = _sz[k] - czh, rq = _sr[k] + Rh + pad;
             if (qx * qx + qy * qy + qz * qz >= rq * rq) continue;
             for (let m = _bst[hi], me_ = _bst[hi] + _bns[hi]; m < me_; m++) {
             const ddx = _sx[k] - _sx[m], ddy = _sy[k] - _sy[m], ddz = _sz[k] - _sz[m], rr = _sr[k] + _sr[m], d2 = ddx * ddx + ddy * ddy + ddz * ddz;
-            if (d2 >= rr * rr || d2 < 1e-18) continue;
+            const rrA = tackOn ? rr + ADH_RANGE : rr;
+            if (d2 >= rrA * rrA || d2 < 1e-18) continue;
             const d = Math.sqrt(d2), nx = ddx / d, ny = ddy / d, nz = ddz / d, pen = rr - d, i = _sb[k], j = _sb[m];
+            if (pen <= 0) {   // inside the tack capture gap only: adhesion, no contact
+              const Wt = 0.5 * (B.type[i].spec.tack + B.type[j].spec.tack); if (!(Wt > 0)) continue;
+              const Fa = 1.5 * PI * Wt * _sr[k] * _sr[m] / rr, ax = -Fa * nx, ay = -Fa * ny, az = -Fa * nz; B.aS[i] += Fa; B.aS[j] += Fa;
+              const cx0 = _sx[k] - nx * _sr[k], cy0 = _sy[k] - ny * _sr[k], cz0 = _sz[k] - nz * _sr[k];
+              B.fx[i] += ax; B.fy[i] += ay; B.fz[i] += az; B.fx[j] -= ax; B.fy[j] -= ay; B.fz[j] -= az;
+              let rx = cx0 - B.px[i], ry = cy0 - B.py[i], rz = cz0 - B.pz[i];
+              B.tx[i] += ry * az - rz * ay; B.ty[i] += rz * ax - rx * az; B.tz[i] += rx * ay - ry * ax;
+              rx = cx0 - B.px[j]; ry = cy0 - B.py[j]; rz = cz0 - B.pz[j];
+              B.tx[j] -= ry * az - rz * ay; B.ty[j] -= rz * ax - rx * az; B.tz[j] -= rx * ay - ry * ax;
+              continue;
+            }
             const Ti = B.type[i], Tj = B.type[j], me = Ti.mass * Tj.mass / (Ti.mass + Tj.mass);
             const kPP = P.contactFreq * P.contactFreq * me, cc = 2 * zetaOf(Math.min(Ti.spec.rest, Tj.spec.rest)) * Math.sqrt(kPP * me);
             const cxm = _sx[k] - nx * _sr[k], cym = _sy[k] - ny * _sr[k], czm = _sz[k] - nz * _sr[k];
@@ -1119,7 +1142,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
             tangSpring(ent, 0, fresh, nx, ny, nz, vtx, vty, vtz, mpair / shr, mu * Fn, dt);
             const ftx = _ft[0], fty = _ft[1], ftz = _ft[2];
             if (dustOn) { const E = (Math.max(0, -Fd * vn) + _ft[3]) * dt * 0.5; if (E > 0) { addDust(sim, B, i, E, cxm, cym, czm, 1, -1, 0); addDust(sim, B, j, E, cxm, cym, czm, 1, -1, 0); } }
-            const Fx = Fn * nx + ftx, Fy = Fn * ny + fty, Fz = Fn * nz + ftz;
+            let Fa = 0; if (tackOn) { const Wt = 0.5 * (Ti.spec.tack + Tj.spec.tack); if (Wt > 0) { Fa = 1.5 * PI * Wt * _sr[k] * _sr[m] / rr; B.aS[i] += Fa; B.aS[j] += Fa; } }
+            const Fx = (Fn - Fa) * nx + ftx, Fy = (Fn - Fa) * ny + fty, Fz = (Fn - Fa) * nz + ftz;
             B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz; B.fx[j] -= Fx; B.fy[j] -= Fy; B.fz[j] -= Fz;
             B.lS[i] += Fn; B.lX[i] += Fn * nx; B.lY[i] += Fn * ny; B.lZ[i] += Fn * nz; B.lS[j] += Fn; B.lX[j] -= Fn * nx; B.lY[j] -= Fn * ny; B.lZ[j] -= Fn * nz;
             let rx = cxm - B.px[i], ry = cym - B.py[i], rz = czm - B.pz[i];
@@ -1134,19 +1158,21 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const G = sim.grid, cp = _cp;
     const hasG = !!G;
     for (let k = 0; k < ns; k++) {
-      const i = _sb[k], rs = _sr[k], X = _sx[k], Y = _sy[k], Z = _sz[k];
+      const i = _sb[k], rs = _sr[k], X = _sx[k], Y = _sy[k], Z = _sz[k], tk = B.type[i].spec.tack, rsA = tk > 0 ? rs + ADH_RANGE : rs;
       const ci = hasG ? Math.floor((X - G.mn[0]) / G.cell) : -1, cj = hasG ? Math.floor((Y - G.mn[1]) / G.cell) : -1, ck = hasG ? Math.floor((Z - G.mn[2]) / G.cell) : -1;
       if (hasG && ci >= 0 && cj >= 0 && ck >= 0 && ci < G.dim[0] && cj < G.dim[1] && ck < G.dim[2]) {
         const list = G.cells.get((ci * G.dim[1] + cj) * G.dim[2] + ck);
-        let wE = 0, wFn = 0, wPen = -1, wnx = 0, wny = 0, wnz = 0, wrx = 0, wry = 0, wrz = 0, wvx = 0, wvy = 0, wvz = 0;
+        let aP = -1, anx = 0, any = 0, anz = 0, arx = 0, ary = 0, arz = 0, wE = 0, wFn = 0, wPen = -1, wnx = 0, wny = 0, wnz = 0, wrx = 0, wry = 0, wrz = 0, wvx = 0, wvy = 0, wvz = 0;
         if (list) for (let li = 0; li < list.length; li++) {
           const bo = list[li] * 6, bb = G.bb;
-          if (X < bb[bo] - rs || X > bb[bo + 3] + rs || Y < bb[bo + 1] - rs || Y > bb[bo + 4] + rs || Z < bb[bo + 2] - rs || Z > bb[bo + 5] + rs) continue;
+          if (X < bb[bo] - rsA || X > bb[bo + 3] + rsA || Y < bb[bo + 1] - rsA || Y > bb[bo + 4] + rsA || Z < bb[bo + 2] - rsA || Z > bb[bo + 5] + rsA) continue;
           closestPtTri(X, Y, Z, G.tris, list[li] * 9, cp);
           const dx = X - cp[0], dy = Y - cp[1], dz = Z - cp[2], d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 >= rs * rs || d2 < 1e-18) continue;
+          if (d2 >= rsA * rsA || d2 < 1e-18) continue;
           const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, nz = dz / d, pen = rs - d, T = B.type[i];
           const rx = cp[0] - B.px[i], ry = cp[1] - B.py[i], rz = cp[2] - B.pz[i];
+          if (tk > 0 && rs - d + ADH_RANGE > aP) { aP = rs - d + ADH_RANGE; anx = nx; any = ny; anz = nz; arx = rx; ary = ry; arz = rz; }
+          if (pen <= 0) continue;
           // contact-point velocity (v + w x r), not the sphere-centre velocity, so wall friction opposes spin
           const cvx = B.vx[i] + B.wy[i] * rz - B.wz[i] * ry, cvy = B.vy[i] + B.wz[i] * rx - B.wx[i] * rz, cvz = B.vz[i] + B.wx[i] * ry - B.wy[i] * rx;
           const vn = cvx * nx + cvy * ny + cvz * nz;
@@ -1167,6 +1193,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
           const Fx = _ft[0], Fy = _ft[1], Fz = _ft[2];
           B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz;
           B.tx[i] += wry * Fz - wrz * Fy; B.ty[i] += wrz * Fx - wrx * Fz; B.tz[i] += wrx * Fy - wry * Fx;
+        }
+        if (aP > 0) {   // tack: one JKR pull-off force per sphere against the nearest wall / plate / glass face
+          const Fa = 1.5 * PI * tk * rs, ax = -Fa * anx, ay = -Fa * any, az = -Fa * anz; B.aS[i] += Fa;
+          B.fx[i] += ax; B.fy[i] += ay; B.fz[i] += az; B.tx[i] += ary * az - arz * ay; B.ty[i] += arz * ax - arx * az; B.tz[i] += arx * ay - ary * ax;
         }
       }
       if (!sim.noFoam) { foamContact(sim, B, i, X, Y, Z, rs, 0, dt, _si[k]); foamContact(sim, B, i, X, Y, Z, rs, 1, dt, _si[k]); }
@@ -1192,7 +1222,9 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       const u = dx * sim.EU[0] + dy * sim.EU[1] + dz * sim.EU[2], v = dx * sim.EV[0] + dy * sim.EV[1] + dz * sim.EV[2], x = dx * sim.EX[0] + dy * sim.EX[1] + dz * sim.EX[2];
       if (!B.crossed) B.crossed = new Uint8Array(B.cap);
       if (!B.crossed[i] && u < -12e-3) { B.crossed[i] = 1; (sim.stats.crossLog || (sim.stats.crossLog = [])).push([sim.t, x * 1e3, v * 1e3, u * 1e3]); }
-      if (B.exitT[i] < 0 && u - sim.U0 < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 && v < sim.W + 3e-3) {
+      // v is measured off the tilted back plate: a pill falling straight down from the nip loses ~0.47 mm of v per mm of u,
+      // so the window's lower edge follows that fall line (else big pills, which must fall further to clear the line, were 'lost')
+      if (B.exitT[i] < 0 && u - sim.U0 < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 + 0.47 * Math.min(0, u - sim.U0 + sim.Rb + P.thickness) && v < sim.W + 3e-3) {
         B.exitT[i] = sim.t; sim.stats.exits.push({ t: sim.t, id: B.id[i], x }); sim.stats.dispensed++;
       }
       if (B.pz[i] < 0.0 || B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } }
@@ -1564,6 +1596,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       $('r_dustPP').textContent = st.dispensed ? m(st.dust / st.dispensed) : '—';
       $('r_dustW').textContent = st.dust > 0 ? `belts ${fmt(st.dustBy[0] / st.dust * 100, 0)}% · pile ${fmt(st.dustBy[1] / st.dust * 100, 0)}% · walls ${fmt(st.dustBy[2] / st.dust * 100, 0)}%` : '—';
       $('r_dustPk').textContent = wi >= 0 ? `pill #${B.id[wi]} lost ${fmt(wf * 100, wf < 1e-4 ? 4 : 3)}% of its mass` : '—'; }
+    { const B = sim.bodies, W = sim.pillType.spec.tack || 0; let nc = 0, mx = 0, mi = -1;
+      for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue; const r = B.aF[i] / (B.type[i].mass * 9.81); if (r > 1) nc++; if (r > mx) { mx = r; mi = i; } }
+      const pr = sim.pillType.spheres.reduce((a, s) => Math.max(a, s[3]), 0);
+      $('r_tk').textContent = W > 0 ? `${fmt(W, 2)} J/m² · ${fmt(1.5 * Math.PI * W * pr * 1e3, 1)} mN per contact` : 'none (dry surface)';
+      const bo = 1.5 * Math.PI * W * pr / (sim.pillType.mass * 9.81);
+      $('r_bond').textContent = W > 0 ? `${fmt(bo, 2)} — ${bo < 0.1 ? 'free-flowing' : bo < 1 ? 'slightly cohesive' : 'cohesive'}` : '0 — free-flowing'; $('r_bond').style.color = bo >= 1 ? '#f66' : bo >= 0.1 ? '#fc6' : '';
+      $('r_cling').textContent = W > 0 ? `${nc} pill${nc === 1 ? '' : 's'}` : '—';
+      $('r_tkMax').textContent = mi >= 0 && mx > 0 ? `pill #${B.id[mi]}: ${fmt(mx, 1)}× its weight` : '—'; }
     if (!(S.crushN > 0) && document.activeElement !== $('crushN')) $('crushN').value = defaultCrush(sim.pillType.spec);   // follows the pill type until you type your own
     { const st = sim.stats, lim = crushLimit(), B = sim.bodies, pk = st.sqPk || 0, fN = x => x >= 1 ? fmt(x, 2) + ' N' : fmt(x * 1e3, 0) + ' mN';
       $('r_sq').textContent = st.sqNow > 0 ? `${fN(st.sqNow)} (pill #${B.id[st.sqNowId]})` : '—';
@@ -1611,7 +1651,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
     S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; if (sim) $('crushN').value = S.crushN > 0 ? S.crushN : defaultCrush(sim.pillType.spec); $('loadCol').checked = !!S.loadCol; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
-    $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; { const M = FFx.PILL_MATS[S.pill.mat || 'pressed']; $('pMat').value = S.pill.mat || 'pressed'; $('pFri').value = (S.pill.fri != null ? S.pill.fri : M.fri) * 100; } $('count').value = S.count;
+    $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; { const M = FFx.PILL_MATS[S.pill.mat || 'pressed']; $('pMat').value = S.pill.mat || 'pressed'; $('pFri').value = (S.pill.fri != null ? S.pill.fri : M.fri) * 100; $('pTack').value = S.pill.tack != null ? S.pill.tack : M.tack; } $('count').value = S.count;
     $('camPhase').value = S.camPhase;
     const sp = S.pill.shape; $('rowL').style.display = (sp === 'capsule' || sp === 'ellipsoid') ? '' : 'none'; $('rowT').style.display = (sp === 'tablet' || sp === 'ellipsoid') ? '' : 'none'; $('rowEdge').style.display = sp === 'tablet' ? '' : 'none';
     $('pWlab').textContent = sp === 'ellipsoid' ? 'Width (mm)' : (sp === 'tablet' || sp === 'sphere' ? 'Diameter (mm)' : 'Diameter (mm)');
@@ -1678,6 +1718,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   hook('pMuF', live('muFoam')); hook('pMuH', live('muHard')); hook('pRest', live('rest'));
   hook('count', v => { S.count = +v; });
   hook('pFri', v => live('fri')(+v / 100));
+  hook('pTack', v => live('tack')(+v));
   $('pMat').onchange = () => { const m = $('pMat').value, M = FFx.PILL_MATS[m]; S.pill.mat = m; S.pill.fri = M.fri; S.pill.tack = M.tack;
     for (const k of ['mat', 'fri', 'tack']) { sim.pillType.spec[k] = S.pill[k]; for (let i = 0; i < sim.bodies.n; i++) sim.bodies.type[i].spec[k] = S.pill[k]; } syncUI(); };
   function rebuildPills() { const wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) }; const th = sim.theta, Sx = sim.S, wT = sim.wearT; newSim(); applyFoam(); sim.wearT = wT; sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i])); sim.theta = th; sim.S = Sx; }
