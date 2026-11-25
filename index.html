@@ -49,6 +49,15 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="row"><label title="stretch the container and back plate with the belts (the container walls keep spanning the idlers, its throat stays at the top of the belts, its front face stays flush with the belt face). Untick to test the belts against the unchanged CAD container">Container follows</label><input type="checkbox" id="hopFollow" checked style="justify-self:start"></div>
 <div class="note" id="geoInfo" style="margin:4px 0"></div>
 <div class="btns"><button id="geoReset">Reset to CAD layout</button></div>
+<h2>Hopper throat</h2>
+<small>Swap the three walls around the throat for an adjustable insert (the back plate the pills slide on stays as is). Positions are measured from the belts and plate, so this works with an uploaded container too (there it can only narrow the throat).</small>
+<div class="row"><label for="thOn" title="replace the CAD throat walls with the adjustable insert below">Custom throat</label><input type="checkbox" id="thOn" style="justify-self:start"></div>
+<div class="row"><label for="thW" title="bottom opening across the belts, centred on the nip (39 mm = the CAD side walls, 5 mm = the nip itself)">Opening width</label><input type="range" id="thW" min="6" max="39" step="0.5" value="39"><span class="v"><span id="thWV"></span> mm</span></div>
+<div class="row"><label for="thSide" title="side walls lean out from the incline by this angle (0 = straight up, like the CAD); they meet the CAD side walls with a 45° chamfer">Side wall angle</label><input type="range" id="thSide" min="0" max="50" step="1" value="0"><span class="v"><span id="thSideV"></span>°</span></div>
+<div class="row"><label for="thDepth" title="distance from the back plate to the front wall at the bottom of the throat (CAD 9 mm = 1 mm in front of the 8 mm belt face)">Front depth</label><input type="range" id="thDepth" min="8.4" max="20" step="0.2" value="9"><span class="v"><span id="thDepthV"></span> mm</span></div>
+<div class="row"><label for="thFront" title="front wall leans out from the back plate by this angle (CAD ≈ 41°). Steep walls end in a sloped chamfer so pills can't park on a ledge">Front wall angle</label><input type="range" id="thFront" min="0" max="70" step="1" value="41"><span class="v"><span id="thFrontV"></span>°</span></div>
+<div class="note" id="thInfo" style="margin:4px 0"></div>
+<div class="btns"><button id="thReset">Reset throat</button></div>
 <h2>Drive</h2>
 <div class="row"><label for="rpm" title="both cams are tied by the worm; sign flips the belt direction">Cam speed</label><input type="range" id="rpm" min="-60" max="60" step="0.5" value="12"><span class="v"><span id="rpmV"></span> rpm</span></div>
 <div class="row"><label for="camPhase" title="phase offset of the second cam (0 = mirrored, both pinch together)">Cam B phase</label><input type="range" id="camPhase" min="-180" max="180" step="5" value="0"><span class="v"><span id="camPhaseV"></span>°</span></div>
@@ -511,14 +520,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   /* Raised top idler: the belt runs up INTO the container. Cut a slot in every container surface the raised belt loop
      now passes through (above the CAD top-idler centre only): triangles near the belts are split to <= 0.5 mm and the
      pieces inside the belt envelope (pulley radius + foam + texture + 0.3 mm running clearance) are dropped. */
-  function cutBeltSlot(v, t, cad, geom, foamH_mm, texH_mm) {
-    const g = normGeom(geom); if (!(g.uTop > GEOM0.uTop + 1e-6)) return { v, t };
+  function cutBeltSlot(v, t, cad, geom, foamH_mm, texH_mm, uMin) {
+    const g = normGeom(geom), U_MIN = uMin == null ? GEOM0.uTop : uMin; if (uMin == null && !(g.uTop > GEOM0.uTop + 1e-6)) return { v, t };
     const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, R = 5 + foamH_mm + (texH_mm || 0) + 0.3, R2 = R * R;
     const L = i => { const d0 = v[i * 3] - O[0], d1 = v[i * 3 + 1] - O[1], d2 = v[i * 3 + 2] - O[2]; return [d0 * ex[0] + d1 * ex[1] + d2 * ex[2], d0 * eu[0] + d1 * eu[1] + d2 * eu[2], d0 * ev[0] + d1 * ev[1] + d2 * ev[2]]; };
-    const inside = p => { if (p[1] <= GEOM0.uTop || p[2] < -0.3 || p[2] > g.W + 0.3) return false;
+    const inside = p => { if (p[1] <= U_MIN || p[2] < -0.3 || p[2] > g.W + 0.3) return false;
       for (const xc of [0, 22.99]) { const tu = Math.min(Math.max(p[1], g.uBot), g.uTop), dx = p[0] - xc, du = p[1] - tu; if (dx * dx + du * du < R2) return true; } return false; };
     const near = (a, b, c) => { const lo = [0, 1, 2].map(k => Math.min(a[k], b[k], c[k])), hi = [0, 1, 2].map(k => Math.max(a[k], b[k], c[k]));
-      if (hi[1] <= GEOM0.uTop || lo[1] > g.uTop + R || hi[2] < -0.3 || lo[2] > g.W + 0.3) return false;
+      if (hi[1] <= U_MIN || lo[1] > g.uTop + R || hi[2] < -0.3 || lo[2] > g.W + 0.3) return false;
       return [0, 22.99].some(xc => hi[0] > xc - R && lo[0] < xc + R); };
     const P = [], T = [], loc = [];
     const W = p => [O[0] + p[0] * ex[0] + p[1] * eu[0] + p[2] * ev[0], O[1] + p[0] * ex[1] + p[1] * eu[1] + p[2] * ev[1], O[2] + p[0] * ex[2] + p[1] * eu[2] + p[2] * ev[2]];
@@ -537,9 +546,100 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     for (let i = 0; i < t.length; i += 3) split(L(t[i]), L(t[i + 1]), L(t[i + 2]), 0);
     return { v: new Float32Array(P), t: new Uint32Array(T) };
   }
+
+  /* ---------------------------------------------------------------- adjustable hopper throat (insert)
+     The back plate the pills ride on never changes. The three walls around the throat are replaced by a parametric
+     insert, defined in the CAD frame (x across, u up the incline, v out of the plate, mm) relative to the belts and
+     plate, so it does not depend on which container mesh is loaded:
+       - side walls: start on the belt crowns, bottom opening `width` centred on the nip, leaning out by `sideDeg`
+         from the incline; at the CAD side walls (x=-8 / 31) or at u=57 they turn out to the side wall on a 45° chamfer
+       - front wall: bottom edge `depth` out from the plate (CAD 9 = 1 mm in front of the belt face) at the CAD lip
+         height, leaning out by `frontDeg` from the plate, up to the container's front wall (built-in hopper) or a
+         sloped chamfer back to the front-wall corner, so there are no ledges or dead pockets for pills to sit in
+     With the built-in hopper the CAD lip + sloped front section are removed so the insert can also be wider/more open. */
+  const THROAT0 = { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 };
+  const NIPX = 11.495, LIPU = 32.67, FB_CAD = [[57.28,27.06],[57.65,28.92],[58.02,30.77],[58.47,32.61],[58.93,34.44],[59.48,36.25],[60.03,38.07],[60.67,39.84],[61.31,41.63],[62.03,43.37],[62.75,45.13],[63.56,46.84],[64.37,48.55],[65.25,50.22],[66.14,51.89],[67.11,53.51],[68.08,55.14],[69.13,56.71],[70.18,58.29],[71.30,59.81],[72.43,61.33],[73.62,62.79],[74.82,64.26],[76.09,65.67],[77.36,67.07],[78.69,68.42],[80.02,69.76],[81.42,71.03],[82.82,72.31],[84.27,73.51],[85.73,74.72],[87.25,75.85],[88.77,76.98],[90.33,78.04],[91.90,79.10],[93.52,80.08],[95.14,81.06],[96.80,81.96],[98.47,82.86],[100.73,83.92],[102.99,84.98]];   // FB_CAD: built-in container front wall (u, v), from its corner up
+  function normThroat(t) { t = Object.assign({}, THROAT0, t || {}); t.width = Math.min(39, Math.max(6, +t.width)); t.sideDeg = Math.min(50, Math.max(0, +t.sideDeg)); t.depth = Math.min(20, Math.max(8.4, +t.depth)); t.frontDeg = Math.min(70, Math.max(0, +t.frontDeg)); return t; }
+  const slopeOK = (du, dv) => { const L = Math.hypot(du, dv); return L < 1e-9 || 0.905 * du + 0.425 * dv >= 0.574 * L; };   // >= 35° from horizontal in the world
+  function frontProfile(t, builtin) {   // polyline [(u, v)] of the insert front wall, bottom to top
+    const ub = LIPU, vb = t.depth, a = t.frontDeg * PI / 180, su = Math.cos(a), sv = Math.sin(a), pts = [];
+    if (vb > 12) pts.push([ub, 10.8]); else pts.push([ub - 1.5, vb]);   // seal down onto the front glass
+    pts.push([ub, vb]);
+    if (builtin) {
+      // first crossing of the ray with the container front wall
+      let best = null;
+      for (let i = 0; i + 1 < FB_CAD.length; i++) {
+        const [u1, v1] = FB_CAD[i], [u2, v2] = FB_CAD[i + 1], eu = u2 - u1, evv = v2 - v1, den = su * evv - sv * eu; if (Math.abs(den) < 1e-12) continue;
+        const s_ = ((u1 - ub) * evv - (v1 - vb) * eu) / den, r = ((u1 - ub) * sv - (v1 - vb) * su) / den;
+        if (s_ > 0 && r >= 0 && r <= 1 && (!best || s_ < best)) best = s_;
+      }
+      if (best) { pts.push([ub + su * best, vb + sv * best]); return pts; }
+      // otherwise: wall up to the highest point from which a >=35° chamfer reaches the front-wall corner
+      const C = FB_CAD[0]; let P1 = [ub, vb];
+      for (let s_ = 0; s_ < 80; s_ += 0.25) { const u = ub + su * s_, v = vb + sv * s_; if (u > C[0]) break; if (slopeOK(C[0] - u, C[1] - v)) P1 = [u, v]; }
+      if (P1[0] > ub + 1e-6) pts.push(P1);
+      pts.push([C[0], C[1]]); for (let i = 1; i < 4; i++) pts.push(FB_CAD[i]);   // overlap the container wall a little
+      return pts;
+    }
+    pts.push([ub + su * 40, vb + sv * 40]); return pts;
+  }
+  function sideProfile(t, side, uTopCad) {   // polyline [(u, x)] of one side wall, bottom to top (CAD frame)
+    const b = t.sideDeg * PI / 180, xb = side < 0 ? NIPX - t.width / 2 : NIPX + t.width / 2, xw = side < 0 ? -8 : 31, xc = side < 0 ? 0 : 22.99;
+    const dx = xb - xc, us = uTopCad + Math.sqrt(Math.max(0, 81 - dx * dx)) - 3;   // start just inside the belt crown (clipped later)
+    const pts = [[us, xb]], uCap = 57.3;
+    if (Math.abs(xb - xw) < 0.05) { pts.push([140, xw]); return pts; }   // full width: the CAD wall itself
+    const tb = Math.tan(b), dist = Math.abs(xw - xb), uReach = tb > 1e-6 ? us + dist / tb : Infinity;
+    if (uReach <= uCap) { pts.push([uReach, xw]); pts.push([uReach + 1, xw]); return pts; }
+    const xAt = xb + side * (uCap - us) * tb; pts.push([uCap, xAt]); pts.push([uCap + Math.abs(xw - xAt), xw]); pts.push([uCap + Math.abs(xw - xAt) + 1, xw]); return pts;
+  }
+  const vAtProfile = (pts, u) => { if (u <= pts[0][0]) return pts[0][1]; for (let i = 0; i + 1 < pts.length; i++) { const [u1, v1] = pts[i], [u2, v2] = pts[i + 1]; if (u >= Math.min(u1, u2) && u <= Math.max(u1, u2) && Math.abs(u2 - u1) > 1e-9) return v1 + (v2 - v1) * (u - u1) / (u2 - u1); } let m = -1e9; for (const p of pts) if (p[0] <= u) m = Math.max(m, p[1]); return m; };
+  function throatMesh(cad, geom, t, builtin, foamH_mm, texH_mm) {
+    t = normThroat(t); if (!t.on) return null;
+    const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, V = [], T = [];
+    const W = (x, u, v) => [O[0] + x * ex[0] + u * eu[0] + v * ev[0], O[1] + x * ex[1] + u * eu[1] + v * ev[1], O[2] + x * ex[2] + u * eu[2] + v * ev[2]];
+    const quad = (a, b, c, d) => { const i = V.length / 3; for (const p of [a, b, c, d]) V.push(...W(p[0], p[1], p[2])); T.push(i, i + 1, i + 2, i, i + 2, i + 3); };
+    const fp = frontProfile(t, builtin), vFront = u => { if (u > fp[fp.length - 1][0]) return builtin ? 90 : fp[fp.length - 1][1]; return Math.max(...[vAtProfile(fp, u)]); };
+    const uMaxFront = fp[fp.length - 1][0];
+    // front wall: extrude its (u,v) profile across x (CAD side wall to side wall)
+    for (let i = 0; i + 1 < fp.length; i++) {
+      const [u1, v1] = fp[i], [u2, v2] = fp[i + 1], n = Math.max(1, Math.ceil(Math.hypot(u2 - u1, v2 - v1) / 1.5));
+      for (let k = 0; k < n; k++) { const a = k / n, c = (k + 1) / n, ua = u1 + (u2 - u1) * a, va = v1 + (v2 - v1) * a, uc = u1 + (u2 - u1) * c, vc = v1 + (v2 - v1) * c;
+        quad([-8.3, ua, va], [31.3, ua, va], [31.3, uc, vc], [-8.3, uc, vc]); }
+    }
+    // side walls: extrude their (u,x) profile from the plate out to the front wall
+    for (const side of [-1, 1]) {
+      const sp = sideProfile(t, side, GEOM0.uTop); if (sp.length === 2 && Math.abs(sp[0][1] - (side < 0 ? -8 : 31)) < 0.05) continue;
+      for (let i = 0; i + 1 < sp.length; i++) {
+        const [u1, x1] = sp[i], [u2a, x2] = sp[i + 1], u2 = Math.min(u2a, builtin ? 140 : uMaxFront + 5);
+        if (u2 <= u1) continue; const n = Math.max(1, Math.ceil(Math.hypot(u2 - u1, x2 - x1) / 1.5));
+        for (let k = 0; k < n; k++) { const a = k / n, c = (k + 1) / n, ua = u1 + (u2a - u1) * a * (u2 - u1) / (u2a - u1), uc = u1 + (u2a - u1) * c * (u2 - u1) / (u2a - u1);
+          const xa = x1 + (x2 - x1) * (ua - u1) / (u2a - u1), xc_ = x1 + (x2 - x1) * (uc - u1) / (u2a - u1), fa = vFront(ua) + 0.3, fc = vFront(uc) + 0.3;
+          if (ua > 103) break;
+          quad([xa, ua, -0.3], [xc_, uc, -0.3], [xc_, uc, fc], [xa, ua, fa]); }
+      }
+    }
+    let v = new Float32Array(V), tt = new Uint32Array(T);
+    v = xformShell(v, cad, geom, true);
+    return cutBeltSlot(v, tt, cad, geom, foamH_mm, texH_mm, -1e9);   // trim wherever a belt (incl. its foam) passes
+  }
+  // built-in container: drop the CAD lip + sloped front section (both shell faces) that the insert replaces
+  function removeThroatCAD(v, t, cad) {
+    const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, keep = [];
+    const L = i => { const d0 = v[i * 3] - O[0], d1 = v[i * 3 + 1] - O[1], d2 = v[i * 3 + 2] - O[2]; return [d0 * ex[0] + d1 * ex[1] + d2 * ex[2], d0 * eu[0] + d1 * eu[1] + d2 * eu[2], d0 * ev[0] + d1 * ev[1] + d2 * ev[2]]; };
+    for (let i = 0; i < t.length; i += 3) {
+      const a = L(t[i]), b = L(t[i + 1]), c = L(t[i + 2]);
+      const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      const sideFace = Math.abs(nx) > 0.5 * Math.hypot(nx, ny, nz);
+      const inZone = [a, b, c].every(p => p[1] >= 25 && p[1] <= 57.6 && p[2] >= 8.5 && p[2] <= 28.6);
+      if (inZone && !sideFace) continue;
+      keep.push(t[i], t[i + 1], t[i + 2]);
+    }
+    return new Uint32Array(keep);
+  }
   // container / plate mesh for a belt layout (world mm): stretch with the idlers (container keeps its top fixed and gets
   // a slot for a raised belt), or the unchanged CAD mesh when the container is not set to follow
-  function shellPart(role, v, t, cad, geom, follow, foamH_mm, texH_mm) {
+  function shellPart(role, v, t, cad, geom, follow, foamH_mm, texH_mm, throat, builtin) {
+    if (role === 'hopper' && throat && throat.on && builtin) t = removeThroatCAD(v, t, cad);
     if (isDefaultGeom(geom)) return { v, t };
     if (role === 'plate') return { v: xformShell(v, cad, geom, false), t };
     if (follow === false) return { v, t };
@@ -570,10 +670,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     for (const p of cad.parts) if (p.role === 'hopper' || p.role === 'plate') {
       let v = p.vArr, t = p.tArr;
       if (!v) { const vb = b64bytes(p.v), tb = b64bytes(p.t); v = new Float32Array(vb.buffer, vb.byteOffset, vb.byteLength / 4); t = new Uint32Array(tb.buffer, tb.byteOffset, tb.byteLength / 4); }
-      { const sp = shellPart(p.role, v, t, cad, geom, opts.hopperFollow, P.thickness * 1e3, opts.tex && opts.tex.active ? opts.tex.hmax * 1e3 : 0); v = sp.v; t = sp.t; }
+      { const sp = shellPart(p.role, v, t, cad, geom, opts.hopperFollow, P.thickness * 1e3, opts.tex && opts.tex.active ? opts.tex.hmax * 1e3 : 0, opts.throat, p.id === '021_00'); v = sp.v; t = sp.t; }
       const tr = new Float64Array(t.length * 3);
       for (let i = 0; i < t.length; i++) { tr[i * 3] = v[t[i] * 3] * 1e-3; tr[i * 3 + 1] = v[t[i] * 3 + 1] * 1e-3; tr[i * 3 + 2] = v[t[i] * 3 + 2] * 1e-3; }
       stat.push(tr);
+    }
+    if (opts.throat && opts.throat.on) {
+      const hop = cad.parts.find(p => p.role === 'hopper'), g = throatMesh(cad, geom, opts.throat, !!hop && hop.id === '021_00', P.thickness * 1e3, opts.tex && opts.tex.active ? opts.tex.hmax * 1e3 : 0);
+      if (g && g.t.length) { const tr = new Float64Array(g.t.length * 3); for (let i = 0; i < g.t.length; i++) for (let a = 0; a < 3; a++) tr[i * 3 + a] = g.v[g.t[i] * 3 + a] * 1e-3; stat.push(tr); sim.throatTris = g.t.length / 3; }
     }
     if (opts.glass !== false) { const g = glassMesh(cad, geom), tr = new Float64Array(g.t.length * 3);
       for (let i = 0; i < g.t.length; i++) for (let a = 0; a < 3; a++) tr[i * 3 + a] = g.v[g.t[i] * 3 + a] * 1e-3;
@@ -1049,7 +1153,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, throatMesh, normThroat, THROAT0, frontProfile, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -1064,14 +1168,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     foamName: 'PU open-cell', shore: 50, thick: 4.0, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
     count: 40, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
-    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
+    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 },   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
   };
   let sim = null, pending = null;
 
   function simGeom() { return { uBot: S.geom.bot, uTop: FFx.GEOM0.uTop + S.geom.top, W: S.geom.W }; }
   function newSim() {
     if (typeof TEX !== 'undefined') TEX.W = S.geom.W * 1e-3;
-    sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: S.glass, geom: simGeom(), hopperFollow: S.hopFollow, params: { rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
+    sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: S.glass, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, params: { rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
     applyParams();
     sim.addPills(S.count);
     buildPillMesh();
@@ -1166,7 +1270,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     }
     return (p._info = info);
   }
-  const geomKey = () => [S.geom.bot, S.geom.top, S.geom.W, S.hopFollow, S.geom.top > 0 ? S.thick + '|' + texHmm() : ''].join('|');
+  const geomKey = () => [S.geom.bot, S.geom.top, S.geom.W, S.hopFollow, JSON.stringify(S.throat), S.thick, S.geom.top > 0 ? S.thick + '|' + texHmm() : ''].join('|');
   function texHmm() { try { return TEX.active ? TEX.hmax * 1e3 : 0; } catch (e) { return 0; } }
   function xformVerts(p, v0) {
     const g = S.geom, info = partInfo(p, v0); if (!g.bot && !g.top && g.W === 8) return v0;
@@ -1310,14 +1414,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const gB = sim.geom.uBot - FFx.GEOM0.uBot, gT = sim.geom.uTop - FFx.GEOM0.uTop;
     for (let k = 0; k < 4; k++) { const Id = IDLERS[k], c = wpt(Id[0], Id[1] + (Id[2] === 'bot' ? gB : gT), 0), a = (Id[3] === 0 ? -1 : 1) * sim.S * 1e3 / 5;
       MR.push(m4.axisAngleAbout(EV, a, c)); MBl.push(m4.axisAngleAbout(EV, a * 4.3 / 6, c)); }
-    for (const p of parts) { if (p.role === 'hopper') continue; const M = p.kind === 'race' ? MR[p.idler] : p.kind === 'ball' ? MBl[p.idler] : p.rot === 'camA' || p.rot === 'gearA' ? MA : p.rot === 'camB' ? MB : p.rot === 'gearB' ? MGB : p.role === 'worm' ? MW : I; draw(p.mesh, M, ROLECOL[p.role] || ROLECOL.static, 1, true); }
+    for (const p of parts) { if (p.role === 'hopper' || p.role === 'throat') continue; const M = p.kind === 'race' ? MR[p.idler] : p.kind === 'ball' ? MBl[p.idler] : p.rot === 'camA' || p.rot === 'gearA' ? MA : p.rot === 'camB' ? MB : p.rot === 'gearB' ? MGB : p.role === 'worm' ? MW : I; draw(p.mesh, M, ROLECOL[p.role] || ROLECOL.static, 1, true); }
     updateBelts(); draw(beltMesh[0], I, [1, 1, 1], 1, true); draw(beltMesh[1], I, [1, 1, 1], 1, true);
     // pills
     const B = sim.bodies;
     for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue; const M = m4.fromQP([B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3]], [B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3]);
       draw(pillMesh, M, hsv(B.hue[i]), 1, false); }
     // hopper translucent
-    if (S.hopperAlpha > 0.01) { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'hopper') draw(p.mesh, I, ROLECOL.hopper, S.hopperAlpha, true); gl.depthMask(true); }
+    if (S.hopperAlpha > 0.01) { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'hopper') draw(p.mesh, I, ROLECOL.hopper, S.hopperAlpha, true); else if (p.role === 'throat') draw(p.mesh, I, [0.98, 0.72, 0.35], Math.min(1, S.hopperAlpha * 1.8 + 0.12), true); gl.depthMask(true); }
     if (S.glass) { gl.enable(gl.BLEND); gl.depthMask(false); draw(glassMeshGL, I, [0.78, 0.93, 1.0], 0.16, true); gl.depthMask(true); }
   }
 
@@ -1414,7 +1518,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 
   function syncUI() {
     if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
-    S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; if (typeof geoInfo === 'function') geoInfo();
+    S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
     $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; $('count').value = S.count;
     $('camPhase').value = S.camPhase;
@@ -1436,6 +1540,16 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const hp = CAD.parts.find(p => p.id === 'user_hopper'); if (hp) CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(hp.vArr, CAD, simGeom(), true) : hp.vArr, hp.tArr);
     rebuildGLParts(); rebuildGlass(); newSim(); applyTex(); geoInfo(); }
   $('hopFollow').onchange = () => { S.hopFollow = $('hopFollow').checked; applyGeom(); };
+  function thInfo() {
+    const t = S.throat, hop = CAD.parts.find(p => p.role === 'hopper'), up = hop && hop.id !== '021_00';
+    $('thInfo').textContent = !t.on ? 'Using the CAD throat.' : `insert: ${fmt(t.width, 1)} mm opening, side walls ${t.sideDeg}°, front ${fmt(t.depth, 1)} mm from the plate at ${t.frontDeg}°` + (up ? ' · uploaded container: the insert sits inside it' : '') + '. Changes restart the run.';
+  }
+  $('thOn').onchange = () => { S.throat.on = $('thOn').checked; thInfo(); applyGeom(); };
+  for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) {
+    $(id).addEventListener('input', () => { S.throat[k] = +$(id).value; $(id + 'V').textContent = $(id).value; thInfo(); });
+    $(id).addEventListener('change', () => { S.throat[k] = +$(id).value; if (!S.throat.on) { S.throat.on = true; $('thOn').checked = true; } thInfo(); applyGeom(); });
+  }
+  $('thReset').onclick = () => { S.throat = { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }; syncUI(); applyGeom(); };
   for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) {
     $(id).addEventListener('input', () => { S.geom[k] = +$(id).value; $(id + 'V').textContent = $(id).value; geoInfo(); });
     $(id).addEventListener('change', () => { S.geom[k] = +$(id).value; applyGeom(); });
@@ -1481,7 +1595,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   $('dtSel').onchange = e => { S.dtMode = +e.target.value; applyParams(); };
   $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dispense_log.csv'; a.click(); };
   $('btnSave').onclick = () => { const o = { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null }; const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); };
-  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {}); if (o.S && o.S.geom) { rebuildGLParts(); rebuildGlass(); }
+  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {}); if (o.S && (o.S.geom || o.S.throat)) { rebuildGLParts(); rebuildGlass(); }
     if (o.texture) { TEX.cells.set(o.texture.cells); TEX.ridge = o.texture.ridge; TEX.groove = o.texture.groove; TEX.len = o.texture.len; for (const [id, k] of [['texRidge', 'ridge'], ['texGroove', 'groove'], ['texLen', 'len']]) { $(id).value = TEX[k]; $(id + 'V').textContent = TEX[k]; } }
     if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); rebuildGLParts(); $('camInfo').textContent = 'Cam profile from setup file.'; }
     newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); };
@@ -1568,7 +1682,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
         const v0 = p.vArr || (p._v0 || (p._v0 = b64(p.v, Float32Array))), t0 = p.tArr || (p._t0 || (p._t0 = b64(p.t, Uint32Array)));
         if (c && c.mesh) { for (const b of [c.mesh.pb, c.mesh.nb, c.mesh.cb, c.mesh.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(c.mesh.vao); }
         let vv, tt = t0;
-        if (p.role === 'plate' || p.role === 'hopper') { const sp = FFx.shellPart(p.role, v0, t0, CAD, simGeom(), S.hopFollow, S.thick, texHmm()); vv = sp.v; tt = sp.t; }
+        if (p.role === 'plate' || p.role === 'hopper') { const sp = FFx.shellPart(p.role, v0, t0, CAD, simGeom(), S.hopFollow, S.thick, texHmm(), S.throat, p.id === '021_00'); vv = sp.v; tt = sp.t; }
         else vv = xformVerts(p, v0);
         c = { key, mesh: mkMesh(vv, tt, null, null, false) }; meshCache.set(p, c);
       }
@@ -1576,7 +1690,13 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       parts.push({ role: p.role, rot: p.rot, mesh: c.mesh, id: p.id, idler: info.idler, kind: info.kind });
     }
     if (CAD.cam.custom && camGen) for (const g of camGen) parts.push(g);
+    if (throatGL) { for (const b of [throatGL.pb, throatGL.nb, throatGL.cb, throatGL.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(throatGL.vao); throatGL = null; }
+    if (S.throat && S.throat.on) {
+      const hop = CAD.parts.find(p => p.role === 'hopper'), g = FFx.throatMesh(CAD, simGeom(), S.throat, !!hop && hop.id === '021_00', S.thick, texHmm());
+      if (g && g.t.length) { throatGL = mkMesh(g.v, g.t, null, null, false); parts.push({ role: 'throat', rot: null, mesh: throatGL, id: 'throat' }); }
+    }
   }
+  let throatGL = null;
   rebuildGLParts(); rebuildGlass();
   function parseSTL(buf) {
     const dv = new DataView(buf), n = buf.byteLength >= 84 ? dv.getUint32(80, true) : 0;
