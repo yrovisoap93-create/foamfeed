@@ -779,7 +779,16 @@ body.nonotes aside small{display:none}
     sim.setPillSpec = function (spec) { sim.pillSpec = normSpec(spec); sim.pillType = makePillType(sim.pillSpec); return sim.pillType; };
     sim.setPillSpec(opts.pill || {});
     sim.bodies = newBodies();
-    sim.reset = function (clearFoam) { sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; sim.stats.escaped = 0; if (clearFoam) sim.resetFoam(); };
+    // the controller and dust specks keep absolute sim times: when the clock restarts they are shifted back by the same
+    // amount (a pending next-feed time of 17 s used to make the motor wait 17 s after Clear / Run trial)
+    sim.rebaseClock = function () { const T0 = sim.t, sh = x => x - T0, C = sim.ctrl;
+      if (C) { C.tNext = Math.max(0, sh(C.tNext)); C.tStop = sh(C.tStop); C.tExit = sh(C.tExit); C.tOut = sh(C.tOut); if (C.gClr >= 0) C.gClr = Math.max(0, sh(C.gClr));
+        for (const f of C.feeds) { f.t0 = sh(f.t0); f.tLast = sh(f.tLast ?? f.t0); if (f.tDet >= 0) f.tDet = sh(f.tDet); if (f.tStop >= 0) f.tStop = sh(f.tStop); f.times = f.times.map(sh); }
+        for (const x of C.sensors) { x.tOn = sh(x.tOn); for (let k = 0; k < x.q.length; k += 2) x.q[k] = sh(x.q[k]); x.times = x.times.map(sh); }
+        C.outN = C.exitN; C.held = 0; }   // the pills that were on their way are gone
+      if (sim.dustFx) { const t = sim.dustFx.t; for (let k = 0; k < t.length; k++) if (t[k] >= 0) t[k] -= T0; }
+      if (sim.stats.sqPkT != null) sim.stats.sqPkT = sh(sim.stats.sqPkT); };
+    sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; sim.stats.escaped = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); sim.cells.dust[b].fill(0); } sim.wearT = 0; };
     { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; }   // pills leave the model 5 mm below the lowest shell surface
     sim.dustFx = { cap: 20000, head: 0, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000) };
