@@ -135,6 +135,9 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <div class="row"><label>Time step</label><select id="dtSel" style="grid-column:2/4"><option value="0.00005">0.05 ms (precise)</option><option value="0.0001" selected>0.1 ms (default)</option><option value="0.00015">0.15 ms (fast)</option></select></div>
 <div class="kv"><b>Sim time</b><span id="r_t"></span><b>Speed</b><span id="r_rtf"></span><b>Spheres</b><span id="r_sph"></span></div>
 <div class="btns"><button id="btnExport">Export dispense log</button><button id="btnSave">Save setup</button><label class="btns" style="margin:0"><button onclick="document.getElementById('fileLoad').click()">Load setup</button></label><input type="file" id="fileLoad" accept=".json" style="display:none"></div>
+<div class="btns"><button id="btnFresh" title="reload with the CAD defaults (your saved setup stays in this browser)">Start fresh (CAD defaults)</button><button id="btnForget" title="delete the copy of the last saved setup kept in this browser">Forget saved</button></div>
+<div class="note" id="saveNote" style="margin:4px 0">Save setup downloads a file and keeps a copy in this browser, which opens automatically next time.</div>
+<div id="ffToast" style="position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#1d2633;color:#dfe8f5;border:1px solid #3a4a60;border-radius:6px;padding:6px 12px;font-size:13px;opacity:0;transition:opacity .4s;pointer-events:none;z-index:50"></div>
 </aside></div>
 <div id="help" class="hide"><div><h3>FoamFeed — what you are looking at</h3>
 <p>Your STEP assembly, simulated: pills dropped in the hopper funnel are pulled by the two counter-rotating <b>foam belts</b> into the 5&nbsp;mm gap, where the two <b>2-lobe cams</b> (tied together by the worm) squeeze the belts together twice per revolution so pills are gripped, metered and separated before they drop out of the bottom.</p>
@@ -1216,22 +1219,26 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   if (!gl) { document.body.insertAdjacentHTML('afterbegin', '<div style="position:fixed;inset:0;background:#111;color:#fff;z-index:99;padding:40px">WebGL2 is required (any current Chrome, Edge, Firefox, Safari).</div>'); return; }
   const VS = `#version 300 es
   in vec3 aPos; in vec3 aNrm; in vec3 aCol; uniform mat4 uVP, uM; uniform vec3 uCol; uniform int uUseCol;
-  out vec3 vW; out vec3 vN; out vec3 vC;
-  void main(){ vec4 w=uM*vec4(aPos,1.0); vW=w.xyz; vN=mat3(uM)*aNrm; vC=(uUseCol==1)?aCol:uCol; gl_Position=uVP*w; }`;
+  out vec3 vW; out vec3 vN; out vec3 vC; out vec3 vL;
+  void main(){ vec4 w=uM*vec4(aPos,1.0); vW=w.xyz; vN=mat3(uM)*aNrm; vC=(uUseCol==1)?aCol:uCol; vL=aPos; gl_Position=uVP*w; }`;
   const FS = `#version 300 es
-  precision highp float; in vec3 vW; in vec3 vN; in vec3 vC; uniform float uAlpha; uniform int uFlat; uniform vec3 uCam; uniform vec4 uClip; uniform int uClipOn; out vec4 o;
+  precision highp float; in vec3 vW; in vec3 vN; in vec3 vC; in vec3 vL; uniform float uAlpha; uniform int uFlat; uniform vec3 uCam; uniform vec4 uClip; uniform int uClipOn; uniform int uPat; out vec4 o;
   void main(){ if(uClipOn==1 && dot(vW,uClip.xyz)>uClip.w) discard;
+    vec3 base=vC;
+    if(uPat==1){ // beach-ball: the pill's 8 octants (its own axes) alternate light / dark, so any rotation is obvious
+      vec3 e=max(fwidth(vL),vec3(1e-4)); vec3 sg=clamp(vL/e,-1.0,1.0); float s=sg.x*sg.y*sg.z;
+      base=mix(vC*0.2, mix(vC,vec3(1.0),0.5), 0.5+0.5*s); }
     vec3 n = (uFlat==1)? normalize(cross(dFdx(vW),dFdy(vW))) : normalize(vN);
     vec3 V=normalize(uCam-vW); if(dot(n,V)<0.0) n=-n;
     vec3 L1=normalize(vec3(0.4,-0.6,0.8)), L2=normalize(vec3(-0.7,0.3,0.2));
     float d=max(dot(n,L1),0.0)*0.75+max(dot(n,L2),0.0)*0.25; float hemi=0.5+0.5*n.z;
-    vec3 col=vC*(0.28+0.30*hemi+0.62*d); vec3 H=normalize(L1+V); col+=pow(max(dot(n,H),0.0),48.0)*0.18;
+    vec3 col=base*(0.28+0.30*hemi+0.62*d); vec3 H=normalize(L1+V); col+=pow(max(dot(n,H),0.0),48.0)*0.18;
     o=vec4(col,uAlpha); }`;
   function sh(t, s) { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; }
   const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   gl.useProgram(prog);
-  const U = {}; ['uVP', 'uM', 'uCol', 'uUseCol', 'uAlpha', 'uFlat', 'uCam', 'uClip', 'uClipOn'].forEach(n => U[n] = gl.getUniformLocation(prog, n));
+  const U = {}; ['uVP', 'uM', 'uCol', 'uUseCol', 'uAlpha', 'uFlat', 'uCam', 'uClip', 'uClipOn', 'uPat'].forEach(n => U[n] = gl.getUniformLocation(prog, n));
   const A = { pos: gl.getAttribLocation(prog, 'aPos'), nrm: gl.getAttribLocation(prog, 'aNrm'), col: gl.getAttribLocation(prog, 'aCol') };
   gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -1245,8 +1252,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     m.type = idx instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
     gl.bindVertexArray(null); return m;
   }
-  function draw(m, M, col, alpha, flat) {
-    gl.bindVertexArray(m.vao); gl.uniformMatrix4fv(U.uM, false, M); gl.uniform3fv(U.uCol, col); gl.uniform1i(U.uUseCol, m.hasC ? 1 : 0);
+  function draw(m, M, col, alpha, flat, pat) {
+    gl.bindVertexArray(m.vao); gl.uniform1i(U.uPat, pat ? 1 : 0); gl.uniformMatrix4fv(U.uM, false, M); gl.uniform3fv(U.uCol, col); gl.uniform1i(U.uUseCol, m.hasC ? 1 : 0);
     gl.uniform1f(U.uAlpha, alpha); gl.uniform1i(U.uFlat, flat ? 1 : 0); gl.drawElements(gl.TRIANGLES, m.n, m.type, 0);
   }
   function b64(s, T) { const bin = atob(s), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new T(a.buffer); }
@@ -1420,7 +1427,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     // pills
     const B = sim.bodies;
     for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue; const M = m4.fromQP([B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3]], [B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3]);
-      draw(pillMesh, M, hsv(B.hue[i]), 1, false); }
+      draw(pillMesh, M, hsv(B.hue[i]), 1, false, true); }
     // hopper translucent
     if (S.hopperAlpha > 0.01) { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'hopper') draw(p.mesh, I, ROLECOL.hopper, S.hopperAlpha, true); else if (p.role === 'throat') draw(p.mesh, I, [0.98, 0.72, 0.35], Math.min(1, S.hopperAlpha * 1.8 + 0.12), true); gl.depthMask(true); }
     if (S.glass) { gl.enable(gl.BLEND); gl.depthMask(false); draw(glassMeshGL, I, [0.78, 0.93, 1.0], 0.16, true); gl.depthMask(true); }
@@ -1595,8 +1602,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   $('camBump').onchange = e => { sim.P.camBump = e.target.checked ? 1 : 0; };
   $('dtSel').onchange = e => { S.dtMode = +e.target.value; applyParams(); };
   $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dispense_log.csv'; a.click(); };
-  $('btnSave').onclick = () => { const o = { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null, hopper: hopRaw ? { name: hopRaw.name, v: b64enc(hopRaw.v), t: b64enc(hopRaw.t), offset: ['hopDx', 'hopDy', 'hopDz'].map(id => +$(id).value || 0) } : null }; const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); };
-  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {});
+  function setupObj() { return { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null, hopper: hopRaw ? { name: hopRaw.name, v: b64enc(hopRaw.v), t: b64enc(hopRaw.t), offset: ['hopDx', 'hopDy', 'hopDz'].map(id => +$(id).value || 0) } : null }; }
+  $('btnSave').onclick = () => { const o = setupObj(); const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); idbPut(o); };
+  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); applySetup(o); e.target.value = ''; };
+  function applySetup(o) { if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {});
     if (o.texture) { TEX.cells.set(o.texture.cells); TEX.ridge = o.texture.ridge; TEX.groove = o.texture.groove; TEX.len = o.texture.len; for (const [id, k] of [['texRidge', 'ridge'], ['texGroove', 'groove'], ['texLen', 'len']]) { $(id).value = TEX[k]; $(id + 'V').textContent = TEX[k]; } }
     if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); $('camInfo').textContent = 'Cam profile from setup file.'; }
     else if (CAD.cam.custom) { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; $('camInfo').textContent = 'Original CAD cam.'; }
@@ -1606,7 +1615,26 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       applyHopper(true);
     } else if (hopRaw) { hopRaw = null; CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat(ORIG.parts.filter(p => p.role === 'hopper')); delete CAD.spawn; $('hopInfo').textContent = 'Original container.'; ['hopDx', 'hopDy', 'hopDz'].forEach(id => $(id).value = 0); }
     applyTex(); rebuildGLParts(); rebuildGlass();   // texture first: a raised-idler slot is cut to clear the ridges
-    newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); };
+    newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); }
+
+  /* ---- last saved setup, kept in this browser (IndexedDB: room for uploaded containers of several MB) */
+  function idb() { return new Promise((res, rej) => { if (!window.indexedDB) return rej(new Error('no IndexedDB')); const r = indexedDB.open('foamfeed', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  async function idbOp(mode, fn) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv', mode), st = tx.objectStore('kv'), rq = fn(st); tx.oncomplete = () => { res(rq && rq.result); db.close(); }; tx.onerror = tx.onabort = () => { rej(tx.error); db.close(); }; }); }
+  async function idbPut(o) {
+    try { await idbOp('readwrite', st => st.put({ savedAt: Date.now(), o: JSON.parse(JSON.stringify(o)) }, 'lastSetup')); saveNote(`Saved · also kept in this browser — it reopens automatically next time.`); }
+    catch (err) { saveNote(`Saved the file, but this browser would not keep a copy (${err.message}).`, true); }
+  }
+  function saveNote(msg, warn) { $('saveNote').innerHTML = warn ? `<span class="warn">${msg}</span>` : msg; }
+  function toast(msg) { const t = $('ffToast'); t.textContent = msg; t.style.opacity = '1'; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.opacity = '0', 6000); }
+  async function restoreLast() {
+    const q = new URLSearchParams(location.search); if (q.has('fresh') || location.hash.length > 1) { if (q.has('fresh')) { saveNote('Started fresh with the CAD defaults. Your saved setup is still kept in this browser.'); toast('Started fresh — CAD defaults'); } return; }
+    let rec = null; try { rec = await idbOp('readonly', st => st.get('lastSetup')); } catch (err) { return; }
+    if (!rec || !rec.o) return;
+    try { applySetup(rec.o); const d = new Date(rec.savedAt).toLocaleString(); saveNote(`Restored your setup saved ${d}.`); toast(`Restored setup from ${d}`); }
+    catch (err) { saveNote(`Could not restore the saved setup (${err.message}); started with the CAD defaults.`, true); }
+  }
+  $('btnFresh').onclick = () => { const u = new URL(location.href); u.searchParams.set('fresh', '1'); u.hash = ''; location.href = u.toString(); };
+  $('btnForget').onclick = async () => { try { await idbOp('readwrite', st => st.delete('lastSetup')); saveNote('Forgot the browser copy. Next time it opens with the CAD defaults.'); } catch (err) { saveNote(err.message, true); } };
   function b64enc(ta) { const u8 = new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength); let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(bin); }
   $('helpBtn').onclick = () => $('help').classList.toggle('hide');
   $('help').onclick = () => $('help').classList.add('hide');
@@ -1909,6 +1937,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (h.get('pause')) { S.paused = true; $('btnPause').textContent = '▶ Resume'; }
     syncUI();
   })();
+  restoreLast();
   requestAnimationFrame(frame);
 })();
 </script>
