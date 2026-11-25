@@ -44,7 +44,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 <details><summary>Foam model parameters</summary><div class="row"><label for="a_eps1" title="strain where the stress-strain curve leaves the linear region and enters the plateau">Elastic limit strain</label><input type="range" id="a_eps1" min="0.03" max="0.3" step="0.01" value="0.15"><span class="v"><span id="a_eps1V"></span></span></div><div class="row"><label for="a_epsD" title="strain where cells are crushed flat and stiffness shoots up">Densification strain</label><input type="range" id="a_epsD" min="0.4" max="0.8" step="0.01" value="0.65"><span class="v"><span id="a_epsDV"></span></span></div><div class="row"><label for="a_epsY" title="strain above which permanent set accumulates">Crush (yield) strain</label><input type="range" id="a_epsY" min="0.05" max="0.7" step="0.01" value="0.45"><span class="v"><span id="a_epsYV"></span></span></div><div class="row"><label for="a_kc" title="recoverable dent (viscoelastic set) growth per second per unit strain above the crush strain; recovers with the recovery time below">Dent creep rate</label><input type="range" id="a_kc" min="0" max="3" step="0.005" value="0.077"><span class="v"><span id="a_kcV"></span> /s</span></div><div class="row"><label for="a_cset" title="permanent thickness loss after 22 h at 50% compression (compression-set test). Drives true wear; scaled by strain² and time under load">Compression set</label><input type="range" id="a_cset" min="0" max="0.4" step="0.005" value="0.05"><span class="v"><span id="a_csetV"></span></span></div><div class="row"><label for="a_tauRec" title="time constant for the recoverable part of the set">Recovery time</label><input type="range" id="a_tauRec" min="0.1" max="20" step="0.1" value="1.5"><span class="v"><span id="a_tauRecV"></span> s</span></div><div class="row"><label for="a_H" title="unloading branch stress = (1-H) x loading branch">Hysteresis (energy loss)</label><input type="range" id="a_H" min="0" max="0.9" step="0.01" value="0.3"><span class="v"><span id="a_HV"></span></span></div><div class="row"><label for="a_tauV" title="damping stress = E * tau * strain-rate">Viscous loss time</label><input type="range" id="a_tauV" min="0" max="0.05" step="0.001" value="0.004"><span class="v"><span id="a_tauVV"></span> s</span></div><div class="row"><label for="a_grip" title="multiplies pill-vs-foam friction coefficient">Foam grip factor</label><input type="range" id="a_grip" min="0.3" max="2.5" step="0.05" value="1.1"><span class="v"><span id="a_gripV"></span></span></div><div class="row"><label for="a_adh" title="adhesive pressure on the contact patch, adds to friction limit">Surface tack</label><input type="range" id="a_adh" min="0" max="4000" step="50" value="300"><span class="v"><span id="a_adhV"></span> Pa</span></div></details>
 <h2>Belt layout</h2>
 <div class="row"><label for="geoBot" title="move the bottom idler bearing stack along the incline (negative = lower, longer belt)">Bottom idler</label><input type="range" id="geoBot" min="-20" max="3" step="0.5" value="0"><span class="v"><span id="geoBotV"></span> mm</span></div>
-<div class="row"><label for="geoTop" title="move the top idler bearing stack along the incline (positive = higher, longer belt)">Top idler</label><input type="range" id="geoTop" min="-6" max="20" step="0.5" value="0"><span class="v"><span id="geoTopV"></span> mm</span></div>
+<div class="row"><label for="geoTop" title="move the top idler bearing stack along the incline (positive = higher, longer belt). The container stays put: a raised belt runs up into it through a slot; the back plate extends with the idler">Top idler</label><input type="range" id="geoTop" min="-6" max="20" step="0.5" value="0"><span class="v"><span id="geoTopV"></span> mm</span></div>
 <div class="row"><label for="geoW" title="belt width across the face (bearing stack height). 8 mm matches the CAD; the idlers, cams, caps and front glass move out with it">Belt width</label><input type="range" id="geoW" min="8" max="14" step="0.5" value="8"><span class="v"><span id="geoWV"></span> mm</span></div>
 <div class="row"><label title="stretch the container and back plate with the belts (the container walls keep spanning the idlers, its throat stays at the top of the belts, its front face stays flush with the belt face). Untick to test the belts against the unchanged CAD container">Container follows</label><input type="checkbox" id="hopFollow" checked style="justify-self:start"></div>
 <div class="note" id="geoInfo" style="margin:4px 0"></div>
@@ -475,26 +475,75 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   // everything in front of the back plate beyond the belt face moves out with the width (same map the renderer uses)
   const vShift = W => 8.2 * (W / 8 - 1);
   function glassBoxes(g) {
-    g = normGeom(g); const dv = vShift(g.W), u0 = -12 + Math.min(0, g.uBot), u1 = 33 + Math.max(0, g.uTop - GEOM0.uTop);
+    g = normGeom(g); const dv = vShift(g.W), u0 = -12 + Math.min(0, g.uBot), u1 = 33 + Math.min(0, g.uTop - GEOM0.uTop);   // glass ends where the container starts
     return [{ x0: -9, x1: 32, u0, u1, v0: 10.8 + dv, v1: 12.0 + dv }, { x0: 7.4, x1: 15.6, u0, u1, v0: g.W + 0.4, v1: 10.8 + dv }];
   }
   // container + back plate follow the belt layout: stretched along the incline between the idlers (so their walls keep
   // spanning the belts), everything beyond the top idler moves with it, and in depth everything in front of the belt
   // face moves out with the width. Rigid parts (idlers) translate instead; the cams/gears stay where the CAD has them.
-  function shellMap(geom) {
-    const g = normGeom(geom), dB = g.uBot - GEOM0.uBot, dT = g.uTop - GEOM0.uTop, sc = g.W / 8, sh = vShift(g.W);
-    return (x, u, v) => [x, u <= 0 ? u + dB : u >= GEOM0.uTop ? u + dT : u + dB + (dT - dB) * u / GEOM0.uTop, v <= 0 ? v : v <= 8.2 ? v * sc : v + sh];
+  function shellMap(geom, topFixed) {
+    const g = normGeom(geom), dB = g.uBot - GEOM0.uBot, dT = topFixed ? Math.min(0, g.uTop - GEOM0.uTop) : g.uTop - GEOM0.uTop, sc = g.W / 8, sh = vShift(g.W);   // container: follows a lowered top idler, but a raised one runs up into it
+    return (x, u, v) => [x, uMap(u, dB, dT), v <= 0 ? v : v <= 8.2 ? v * sc : v + sh];
+  }
+  /* Along the incline the frame is split into rigid zones: everything around the bottom idler (u <= 4 mm) moves with it,
+     the cam / gear / drive zone (7..18 mm) stays put, everything around the top idler (u >= 24.8 mm) moves with it, and
+     only the two short spans in between stretch. So the back plate's idler holes, the axle washers and screws behind the
+     plate all stay with their idlers, and the cam-shaft holes stay on the cam shafts. Monotonic for the slider ranges. */
+  const UZ = [4, 7, 18, 24.8];
+  function uMap(u, dB, dT) {
+    if (u <= UZ[0]) return u + dB;
+    if (u < UZ[1]) return u + dB * (UZ[1] - u) / (UZ[1] - UZ[0]);
+    if (u <= UZ[2]) return u;
+    if (u < UZ[3]) return u + dT * (u - UZ[2]) / (UZ[3] - UZ[2]);
+    return u + dT;
   }
   function isDefaultGeom(geom) { const g = normGeom(geom); return g.uBot === GEOM0.uBot && g.uTop === GEOM0.uTop && g.W === GEOM0.W; }
-  function xformShell(v0, cad, geom) {      // world-mm vertex array -> new array
+  function xformShell(v0, cad, geom, topFixed) {      // world-mm vertex array -> new array
     if (isDefaultGeom(geom)) return v0;
-    const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, map = shellMap(geom), v = new Float32Array(v0.length);
+    const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, map = shellMap(geom, topFixed), v = new Float32Array(v0.length);
     for (let i = 0; i < v0.length; i += 3) {
       const d0 = v0[i] - O[0], d1 = v0[i + 1] - O[1], d2 = v0[i + 2] - O[2];
       const m = map(d0 * ex[0] + d1 * ex[1] + d2 * ex[2], d0 * eu[0] + d1 * eu[1] + d2 * eu[2], d0 * ev[0] + d1 * ev[1] + d2 * ev[2]);
       for (let k = 0; k < 3; k++) v[i + k] = O[k] + m[0] * ex[k] + m[1] * eu[k] + m[2] * ev[k];
     }
     return v;
+  }
+  /* Raised top idler: the belt runs up INTO the container. Cut a slot in every container surface the raised belt loop
+     now passes through (above the CAD top-idler centre only): triangles near the belts are split to <= 0.5 mm and the
+     pieces inside the belt envelope (pulley radius + foam + texture + 0.3 mm running clearance) are dropped. */
+  function cutBeltSlot(v, t, cad, geom, foamH_mm, texH_mm) {
+    const g = normGeom(geom); if (!(g.uTop > GEOM0.uTop + 1e-6)) return { v, t };
+    const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, R = 5 + foamH_mm + (texH_mm || 0) + 0.3, R2 = R * R;
+    const L = i => { const d0 = v[i * 3] - O[0], d1 = v[i * 3 + 1] - O[1], d2 = v[i * 3 + 2] - O[2]; return [d0 * ex[0] + d1 * ex[1] + d2 * ex[2], d0 * eu[0] + d1 * eu[1] + d2 * eu[2], d0 * ev[0] + d1 * ev[1] + d2 * ev[2]]; };
+    const inside = p => { if (p[1] <= GEOM0.uTop || p[2] < -0.3 || p[2] > g.W + 0.3) return false;
+      for (const xc of [0, 22.99]) { const tu = Math.min(Math.max(p[1], g.uBot), g.uTop), dx = p[0] - xc, du = p[1] - tu; if (dx * dx + du * du < R2) return true; } return false; };
+    const near = (a, b, c) => { const lo = [0, 1, 2].map(k => Math.min(a[k], b[k], c[k])), hi = [0, 1, 2].map(k => Math.max(a[k], b[k], c[k]));
+      if (hi[1] <= GEOM0.uTop || lo[1] > g.uTop + R || hi[2] < -0.3 || lo[2] > g.W + 0.3) return false;
+      return [0, 22.99].some(xc => hi[0] > xc - R && lo[0] < xc + R); };
+    const P = [], T = [], loc = [];
+    const W = p => [O[0] + p[0] * ex[0] + p[1] * eu[0] + p[2] * ev[0], O[1] + p[0] * ex[1] + p[1] * eu[1] + p[2] * ev[1], O[2] + p[0] * ex[2] + p[1] * eu[2] + p[2] * ev[2]];
+    const add = p => { const w = W(p); P.push(w[0], w[1], w[2]); return P.length / 3 - 1; };
+    const emit = (a, b, c) => { T.push(add(a), add(b), add(c)); };
+    const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+    let budget = 400000;
+    const split = (a, b, c, depth) => {
+      if (!near(a, b, c)) { emit(a, b, c); return; }
+      const e0 = d2(a, b), e1 = d2(b, c), e2 = d2(c, a), m = Math.max(e0, e1, e2);
+      if (m <= 0.25 || depth > 18 || --budget < 0) { const cen = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3]; if (!inside(cen)) emit(a, b, c); return; }
+      if (m === e0) { const p = mid(a, b); split(a, p, c, depth + 1); split(p, b, c, depth + 1); }
+      else if (m === e1) { const p = mid(b, c); split(a, b, p, depth + 1); split(a, p, c, depth + 1); }
+      else { const p = mid(c, a); split(a, b, p, depth + 1); split(p, b, c, depth + 1); }
+    };
+    for (let i = 0; i < t.length; i += 3) split(L(t[i]), L(t[i + 1]), L(t[i + 2]), 0);
+    return { v: new Float32Array(P), t: new Uint32Array(T) };
+  }
+  // container / plate mesh for a belt layout (world mm): stretch with the idlers (container keeps its top fixed and gets
+  // a slot for a raised belt), or the unchanged CAD mesh when the container is not set to follow
+  function shellPart(role, v, t, cad, geom, follow, foamH_mm, texH_mm) {
+    if (isDefaultGeom(geom)) return { v, t };
+    if (role === 'plate') return { v: xformShell(v, cad, geom, false), t };
+    if (follow === false) return { v, t };
+    return cutBeltSlot(xformShell(v, cad, geom, true), t, cad, geom, foamH_mm, texH_mm);
   }
   function glassMesh(cad, geom) {
     const F = cad.frame, v = [], t = [], boxes = glassBoxes(geom);
@@ -521,7 +570,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     for (const p of cad.parts) if (p.role === 'hopper' || p.role === 'plate') {
       let v = p.vArr, t = p.tArr;
       if (!v) { const vb = b64bytes(p.v), tb = b64bytes(p.t); v = new Float32Array(vb.buffer, vb.byteOffset, vb.byteLength / 4); t = new Uint32Array(tb.buffer, tb.byteOffset, tb.byteLength / 4); }
-      if (p.role === 'plate' || opts.hopperFollow !== false) v = xformShell(v, cad, geom);
+      { const sp = shellPart(p.role, v, t, cad, geom, opts.hopperFollow, P.thickness * 1e3, opts.tex && opts.tex.active ? opts.tex.hmax * 1e3 : 0); v = sp.v; t = sp.t; }
       const tr = new Float64Array(t.length * 3);
       for (let i = 0; i < t.length; i++) { tr[i * 3] = v[t[i] * 3] * 1e-3; tr[i * 3 + 1] = v[t[i] * 3 + 1] * 1e-3; tr[i * 3 + 2] = v[t[i] * 3 + 2] * 1e-3; }
       stat.push(tr);
@@ -564,7 +613,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   function addPills(sim, n, region) {
     const B = sim.bodies, T = sim.pillType, R = sim.rand;
     if (!region && !sim.cad.spawn && sim.hopFollow && !isDefaultGeom(sim.geom)) {   // built-in drop zone rides with the container
-      const g = sim.geom, dT = (g.uTop - GEOM0.uTop) * 1e-3, sh = vShift(g.W) * 1e-3, D = [0, 1, 2].map(k => dT * sim.EU[k] + sh * sim.EV[k]);
+      const g = sim.geom, sh = vShift(g.W) * 1e-3, dT = Math.min(0, g.uTop - GEOM0.uTop) * 1e-3, D = [0, 1, 2].map(k => dT * sim.EU[k] + sh * sim.EV[k]);
       region = { x: [6e-3 + D[0], 39e-3 + D[0]], y: [40e-3 + D[1], 64e-3 + D[1]], z: [118e-3 + D[2], 400e-3 + D[2]] };
     }
     region = region || sim.cad.spawn || { x: [6e-3, 39e-3], y: [40e-3, 64e-3], z: [118e-3, 400e-3] };
@@ -651,7 +700,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     out[1] = ((h10 - h00) * (1 - b) + (h11 - h01) * b) * tx.nq / tx.Lt;
     out[2] = clampV ? 0 : ((h01 - h00) * (1 - a) + (h11 - h10) * a) * tx.nv / tx.W;
   }
-  const _APN = 6000, _ap = new Float64Array(_APN * 11), _apg = new Float64Array(_APN), _qb = [1, 0, 0, 0];
+  function _sideHit(n) { for (let k = 0; k < n; k++) if (_ap[k * 12 + 11] !== 0) return true; return false; }
+  const _APN = 6000, _ap = new Float64Array(_APN * 12), _apg = new Float64Array(_APN), _qb = [1, 0, 0, 0];
 
   function foamContact(sim, B, bi, sx, sy, sz, rs, belt, dt, si) {
     const P = sim.P, f = sim.foam, h = P.thickness, Rb = sim.Rb, Lc = sim.Lc;
@@ -678,10 +728,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     else { D = Math.hypot(qn, outW); n2x = qn / D * xl / d2; n2u = qn / D * lu / d2; nvv = (v < 0 ? -1 : 1) * outW / D; }
     const T = B.type[bi], PT = T.patches ? T.patches[si] : null, mgn = PT ? T.patchMargin[si] : 0;
     const pen = rs - D; if (pen <= -mgn) return false;    // true surface may stand up to mgn proud of the sphere
-    const nx = sgn * n2x * sim.EX[0] + n2u * sim.EU[0] + nvv * sim.EV[0], ny = sgn * n2x * sim.EX[1] + n2u * sim.EU[1] + nvv * sim.EV[1], nz = sgn * n2x * sim.EX[2] + n2u * sim.EU[2] + nvv * sim.EV[2];
+    let nx = sgn * n2x * sim.EX[0] + n2u * sim.EU[0] + nvv * sim.EV[0], ny = sgn * n2x * sim.EX[1] + n2u * sim.EU[1] + nvv * sim.EV[1], nz = sgn * n2x * sim.EX[2] + n2u * sim.EU[2] + nvv * sim.EV[2];
     // surface velocity: travel tangent (n_u, -n_x) in the local (x,u) plane, facing side moves toward -u
     const vb = sim.beltSpeed(); let tlx = n2u, tlu = -n2x; if (outW > 0 && qn <= 0) { tlx = 0; tlu = 0; }
-    const svx = vb * (sgn * tlx * sim.EX[0] + tlu * sim.EU[0]), svy = vb * (sgn * tlx * sim.EX[1] + tlu * sim.EU[1]), svz = vb * (sgn * tlx * sim.EX[2] + tlu * sim.EU[2]);
+    let svx = vb * (sgn * tlx * sim.EX[0] + tlu * sim.EU[0]), svy = vb * (sgn * tlx * sim.EX[1] + tlu * sim.EU[1]), svz = vb * (sgn * tlx * sim.EX[2] + tlu * sim.EU[2]);
     const Rmid = Rb + 4e-3 * 0.5, cl = sim.cells;
     const sig = loopSigma(xl, u, tcl, Rmid, Lc);
     let q = (sig - sim.S) % cl.perim; if (q < 0) q += cl.perim;
@@ -710,12 +760,28 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
         let dl = Rtop - dp; if (dl <= 0 || dp < 1e-9) continue;
         const qq = q + ox * tlx + ou * tlu; let hT = 0, gq = 0, gv = 0;
         if (texOn) { texHG(TX, qq, vp, _r3); hT = _r3[0]; gq = _r3[1]; gv = _r3[2]; dl -= hmax - hT; if (dl <= 0) continue; }
-        const o = npts * 11; AP[o] = dl; AP[o + 1] = qq; AP[o + 2] = vp; AP[o + 3] = PT[j + 3]; AP[o + 4] = hT; AP[o + 5] = xp / dp; AP[o + 6] = lp / dp;
+        // nearest belt surface: the running face (radial) or a side face of the belt (front v=W / back v=0), whichever
+        // this point is closer to. A pill sliding past the belt's edge loads the side face, not a phantom deep radial dent
+        const dvF = Wb - vp, dvB = vp, dvs = dvF < dvB ? dvF : dvB;
+        const o = npts * 12;
+        if (dvs < dl) { AP[o] = dvs; AP[o + 5] = 0; AP[o + 6] = 0; AP[o + 11] = dvF < dvB ? 1 : -1; hT = 0; gq = 0; gv = 0; }
+        else { AP[o] = dl; AP[o + 5] = xp / dp; AP[o + 6] = lp / dp; AP[o + 11] = 0; }
+        dl = AP[o]; AP[o + 1] = qq; AP[o + 2] = vp; AP[o + 3] = PT[j + 3]; AP[o + 4] = hT;
         AP[o + 7] = ux; AP[o + 8] = uy; AP[o + 9] = uz; AP[o + 10] = gq; _apg[npts] = gv;
         const w = dl * PT[j + 3]; wsum += w; wux += w * ux; wuy += w * uy; wuz += w * uz; npts++;
         if (npts >= _APN) break;
       }
       if (npts === 0) return false;
+      if (outW > 0 || _sideHit(npts)) {
+        // pill overhanging the belt edge: only the part over the belt presses the foam, and it presses along the belt's
+        // own normal. Use the load-weighted patch normal as the contact normal (the sphere-to-edge direction points
+        // sideways and made damping/friction act in the wrong plane: overhanging pills were launched at metres per second)
+        let ax = 0, au = 0, avv = 0; for (let k = 0; k < npts; k++) { const o = k * 12, w = AP[o] * AP[o + 3]; ax += w * AP[o + 5]; au += w * AP[o + 6]; avv += w * AP[o + 11]; }
+        const al = Math.hypot(ax, au, avv) || 1; ax /= al; au /= al; avv /= al;
+        nx = sgn * ax * sim.EX[0] + au * sim.EU[0] + avv * sim.EV[0]; ny = sgn * ax * sim.EX[1] + au * sim.EU[1] + avv * sim.EV[1]; nz = sgn * ax * sim.EX[2] + au * sim.EU[2] + avv * sim.EV[2];
+        const rl = Math.hypot(ax, au); if (rl > 1e-6) { tlx = au / rl; tlu = -ax / rl; } else { tlx = 0; tlu = 0; }
+        svx = vb * (sgn * tlx * sim.EX[0] + tlu * sim.EU[0]); svy = vb * (sgn * tlx * sim.EX[1] + tlu * sim.EU[1]); svz = vb * (sgn * tlx * sim.EX[2] + tlu * sim.EU[2]);
+      }
     } else if (pen <= 0) return false;
     // load centroid (world, relative to the pill centre): where the foam actually pushes
     let rx = -nx * rs, ry = -ny * rs, rz = -nz * rs;
@@ -731,7 +797,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const vn = vrx * nx + vry * ny + vrz * nz;              // >0 : separating
     const vtx = vrx - vn * nx, vty = vry - vn * ny, vtz = vrz - vn * nz;
     let Fn = 0, Fv = 0, epsAcc = 0, nAct = 0, Gq = 0, Gv = 0, Gw = 0, a2 = 0;
-    let SX = 0, SU = 0, AXx = 0, AXy = 0, AXz = 0, AUx = 0, AUy = 0, AUz = 0;   // patch-normal force sums (belt frame) + their moments
+    let SX = 0, SU = 0, SV = 0, AXx = 0, AXy = 0, AXz = 0, AUx = 0, AUy = 0, AUz = 0, AVx = 0, AVy = 0, AVz = 0;   // patch-normal force sums (belt frame) + their moments
     const dvc = sim.W / cl.nv, cellA = cl.dq * dvc, wearX = P.wearX > 0 ? P.wearX : 1;
     // one foam "spring" per surface patch: local compression -> stress (with hysteresis/viscosity) x patch area
     const patch = (dloc, qq, vv, dA, hT) => {
@@ -753,9 +819,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (PT) {
       const AP = _ap;
       for (let k = 0; k < npts; k++) {
-        const o = k * 11, dF = patch(AP[o], AP[o + 1], AP[o + 2], AP[o + 3], AP[o + 4]); if (dF <= 0) continue;
-        const a_ = dF * AP[o + 5], b_ = dF * AP[o + 6]; SX += a_; SU += b_;
+        const o = k * 12, dF = patch(AP[o], AP[o + 1], AP[o + 2], AP[o + 3], AP[o + 4]); if (dF <= 0) continue;
+        const a_ = dF * AP[o + 5], b_ = dF * AP[o + 6], c_ = dF * AP[o + 11]; SX += a_; SU += b_; SV += c_;
         AXx += a_ * AP[o + 7]; AXy += a_ * AP[o + 8]; AXz += a_ * AP[o + 9]; AUx += b_ * AP[o + 7]; AUy += b_ * AP[o + 8]; AUz += b_ * AP[o + 9];
+        if (c_ !== 0) { AVx += c_ * AP[o + 7]; AVy += c_ * AP[o + 8]; AVz += c_ * AP[o + 9]; }
         if (texOn) { Gq += dF * AP[o + 10]; Gv += dF * _apg[k]; Gw += dF; }
       }
     } else {   // fallback: analytic cap of the sphere (4 rings)
@@ -785,13 +852,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       const fl = Math.hypot(fnx, fny, fnz); fnx /= fl; fny /= fl; fnz /= fl;
     }
     let Fx, Fy, Fz, Tx, Ty, Tz;
-    const Fel = Math.hypot(SX, SU);
+    const Fel = Math.hypot(SX, SU, SV);
     if (PT && Fel > 0) {
       // elastic part: exact sum of the per-patch normal forces and of their moments about the pill centre
-      const ex_ = SX * sgn; let wfx = ex_ * sim.EX[0] + SU * sim.EU[0], wfy = ex_ * sim.EX[1] + SU * sim.EU[1], wfz = ex_ * sim.EX[2] + SU * sim.EU[2];
+      const ex_ = SX * sgn; let wfx = ex_ * sim.EX[0] + SU * sim.EU[0] + SV * sim.EV[0], wfy = ex_ * sim.EX[1] + SU * sim.EU[1] + SV * sim.EV[1], wfz = ex_ * sim.EX[2] + SU * sim.EU[2] + SV * sim.EV[2];
       qconjv(_qb, sgn * sim.EX[0], sgn * sim.EX[1], sgn * sim.EX[2], _r3); const ax0 = _r3[0], ax1 = _r3[1], ax2 = _r3[2];
       qconjv(_qb, sim.EU[0], sim.EU[1], sim.EU[2], _r3); const au0 = _r3[0], au1 = _r3[1], au2 = _r3[2];
-      qmulv(_qb, AXy * ax2 - AXz * ax1 + AUy * au2 - AUz * au1, AXz * ax0 - AXx * ax2 + AUz * au0 - AUx * au2, AXx * ax1 - AXy * ax0 + AUx * au1 - AUy * au0, _r3);
+      qconjv(_qb, sim.EV[0], sim.EV[1], sim.EV[2], _r3); const av0 = _r3[0], av1 = _r3[1], av2 = _r3[2];
+      qmulv(_qb, AXy * ax2 - AXz * ax1 + AUy * au2 - AUz * au1 + AVy * av2 - AVz * av1, AXz * ax0 - AXx * ax2 + AUz * au0 - AUx * au2 + AVz * av0 - AVx * av2, AXx * ax1 - AXy * ax0 + AUx * au1 - AUy * au0 + AVx * av1 - AVy * av0, _r3);
       const scx = sx - B.px[bi], scy = sy - B.py[bi], scz = sz - B.pz[bi];
       // rest (viscous, texture tilt, friction) acts at the load centroid; Fn already includes Fv (and the clamp)
       let extra = Fn - Fel; const ux_ = wfx / Fel, uy_ = wfy / Fel, uz_ = wfz / Fel;
@@ -981,7 +1049,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, glassMesh, glassBoxes, xformShell, shellMap, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -1089,7 +1157,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     if (p._info) return p._info;
     let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
     for (let i = 0; i < v.length; i += 3) { const l = toLoc(v[i], v[i + 1], v[i + 2]); for (let k = 0; k < 3; k++) { if (l[k] < mn[k]) mn[k] = l[k]; if (l[k] > mx[k]) mx[k] = l[k]; } }
-    const cx = (mn[0] + mx[0]) / 2, cu = (mn[1] + mx[1]) / 2, info = { idler: -1, kind: null };
+    const cx = (mn[0] + mx[0]) / 2, cu = (mn[1] + mx[1]) / 2, info = { idler: -1, kind: null, cu };
     if (p.role === 'static' && !p.rot && mx[2] > 1) IDLERS.forEach((I, k) => { if (Math.abs(cx - I[0]) < 6 && Math.abs(cu - I[1]) < 6) info.idler = k; });
     if (info.idler >= 0) {
       const I = IDLERS[info.idler], ex_ = mx[0] - mn[0], eu_ = mx[1] - mn[1], rc = Math.hypot(cx - I[0], cu - I[1]);
@@ -1098,11 +1166,14 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     }
     return (p._info = info);
   }
-  const geomKey = () => [S.geom.bot, S.geom.top, S.geom.W, S.hopFollow].join('|');
+  const geomKey = () => [S.geom.bot, S.geom.top, S.geom.W, S.hopFollow, S.geom.top > 0 ? S.thick + '|' + texHmm() : ''].join('|');
+  function texHmm() { try { return TEX.active ? TEX.hmax * 1e3 : 0; } catch (e) { return 0; } }
   function xformVerts(p, v0) {
     const g = S.geom, info = partInfo(p, v0); if (!g.bot && !g.top && g.W === 8) return v0;
-    if (p.role === 'plate' || p.role === 'hopper') return p.role === 'hopper' && !S.hopFollow ? v0 : FFx.xformShell(v0, CAD, simGeom());
-    const v = new Float32Array(v0.length), du = info.idler < 0 ? 0 : (IDLERS[info.idler][2] === 'bot' ? g.bot : g.top), sc = g.W / 8, sh = FFx.vShift(g.W);
+    if (p.role === 'plate' || p.role === 'hopper') return null;
+    // rigid hardware (idler stacks, axles, washers, screws, caps) moves with the zone it sits in; the drive train stays put
+    const rigid = p.role === 'static' && !p.rot, du = rigid ? FFx.uMap(info.cu, g.bot, g.top) - info.cu : 0;
+    const v = new Float32Array(v0.length), sc = g.W / 8, sh = FFx.vShift(g.W);
     for (let i = 0; i < v0.length; i += 3) {
       const l = toLoc(v0[i], v0[i + 1], v0[i + 2]); let w = l[2];
       if (w > 0) w = w <= 8.2 ? w * sc : w + sh;
@@ -1236,7 +1307,8 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     // idler bearings: the outer race turns with the belt's inner face (no slip, belt travel S over the 5 mm race radius);
     // the balls orbit with the cage at r_outer_contact / (2 r_pitch) = 4.3 / 6 of the race speed; inner race sits on the axle
     const MR = [], MBl = [];
-    for (let k = 0; k < 4; k++) { const Id = IDLERS[k], c = wpt(Id[0], Id[1] + (Id[2] === 'bot' ? S.geom.bot : S.geom.top), 0), a = (Id[3] === 0 ? -1 : 1) * sim.S * 1e3 / 5;
+    const gB = sim.geom.uBot - FFx.GEOM0.uBot, gT = sim.geom.uTop - FFx.GEOM0.uTop;
+    for (let k = 0; k < 4; k++) { const Id = IDLERS[k], c = wpt(Id[0], Id[1] + (Id[2] === 'bot' ? gB : gT), 0), a = (Id[3] === 0 ? -1 : 1) * sim.S * 1e3 / 5;
       MR.push(m4.axisAngleAbout(EV, a, c)); MBl.push(m4.axisAngleAbout(EV, a * 4.3 / 6, c)); }
     for (const p of parts) { if (p.role === 'hopper') continue; const M = p.kind === 'race' ? MR[p.idler] : p.kind === 'ball' ? MBl[p.idler] : p.rot === 'camA' || p.rot === 'gearA' ? MA : p.rot === 'camB' ? MB : p.rot === 'gearB' ? MGB : p.role === 'worm' ? MW : I; draw(p.mesh, M, ROLECOL[p.role] || ROLECOL.static, 1, true); }
     updateBelts(); draw(beltMesh[0], I, [1, 1, 1], 1, true); draw(beltMesh[1], I, [1, 1, 1], 1, true);
@@ -1355,12 +1427,13 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   hook('foamType', v => { S.foamName = v; S.shore = FFx.FOAMS[v].S; for (const k in adv) delete adv[k]; applyFoam(); syncUI(); });
   hook('shore', v => { S.shore = +v; for (const k of ['E']) delete adv[k]; applyFoam(); });
   hook('thick', v => { S.thick = +v; applyParams(); geoInfo(); });
+  $('thick').addEventListener('change', () => { if (S.geom.top > 0 && S.hopFollow) applyGeom(); });
   function geoInfo() {
     const Lc = FFx.GEOM0.uTop + S.geom.top - S.geom.bot, loop = 2 * Lc + TAU * (5 + S.thick / 2);
     $('geoInfo').textContent = `idler centres ${fmt(Lc, 1)} mm apart · belt loop ${fmt(loop, 1)} mm (mid-foam) · ${fmt(S.geom.W, 1)} mm wide` + (S.geom.bot || S.geom.top || S.geom.W !== 8 ? ' · changed from CAD' : ' · CAD layout') + '. Changing these restarts the run with a fresh belt.';
   }
   function applyGeom() {
-    const hp = CAD.parts.find(p => p.id === 'user_hopper'); if (hp) CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(hp.vArr, CAD, simGeom()) : hp.vArr, hp.tArr);
+    const hp = CAD.parts.find(p => p.id === 'user_hopper'); if (hp) CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(hp.vArr, CAD, simGeom(), true) : hp.vArr, hp.tArr);
     rebuildGLParts(); rebuildGlass(); newSim(); applyTex(); geoInfo(); }
   $('hopFollow').onchange = () => { S.hopFollow = $('hopFollow').checked; applyGeom(); };
   for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) {
@@ -1494,7 +1567,10 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
       if (!c || c.key !== key) {
         const v0 = p.vArr || (p._v0 || (p._v0 = b64(p.v, Float32Array))), t0 = p.tArr || (p._t0 || (p._t0 = b64(p.t, Uint32Array)));
         if (c && c.mesh) { for (const b of [c.mesh.pb, c.mesh.nb, c.mesh.cb, c.mesh.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(c.mesh.vao); }
-        c = { key, mesh: mkMesh(xformVerts(p, v0), t0, null, null, false) }; meshCache.set(p, c);
+        let vv, tt = t0;
+        if (p.role === 'plate' || p.role === 'hopper') { const sp = FFx.shellPart(p.role, v0, t0, CAD, simGeom(), S.hopFollow, S.thick, texHmm()); vv = sp.v; tt = sp.t; }
+        else vv = xformVerts(p, v0);
+        c = { key, mesh: mkMesh(vv, tt, null, null, false) }; meshCache.set(p, c);
       }
       const info = p._info || { idler: -1, kind: null };
       parts.push({ role: p.role, rot: p.rot, mesh: c.mesh, id: p.id, idler: info.idler, kind: info.kind });
@@ -1547,7 +1623,7 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
     const dx = +$('hopDx').value || 0, dy = +$('hopDy').value || 0, dz = +$('hopDz').value || 0, v = new Float32Array(hopRaw.v);
     for (let i = 0; i < v.length; i += 3) { v[i] += dx; v[i + 1] += dy; v[i + 2] += dz; }
     CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat([{ id: 'user_hopper', role: 'hopper', rot: null, vArr: v, tArr: hopRaw.t }]);
-    CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(v, CAD, simGeom()) : v, hopRaw.t);
+    CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(v, CAD, simGeom(), true) : v, hopRaw.t);
     let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9]; for (let i = 0; i < v.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], v[i + a]); mx[a] = Math.max(mx[a], v[i + a]); }
     const nt = hopRaw.t.length / 3, size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
     const lo = toLocal(...mn), hi = toLocal(...mx);
