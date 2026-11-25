@@ -32,7 +32,19 @@ details{margin:4px 0}summary{cursor:pointer;color:#9fb6d8}small,.note{color:#7e8
  .note,small{font-size:12px}
  #help div{max-width:94vw;padding:14px 16px}
 }
-table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{border-bottom:1px solid #2a303b;padding:2px 3px;text-align:right}td:first-child,th:first-child{text-align:left;color:#9fb0c8}</style></head><body><div id="app">
+table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{border-bottom:1px solid #2a303b;padding:2px 3px;text-align:right}td:first-child,th:first-child{text-align:left;color:#9fb0c8}
+/* collapsible sections (built at load by the UI script) */
+.sec{border:1px solid #262c37;border-radius:6px;margin:6px 0;background:#1a1f27}
+.sech{display:flex;align-items:center;gap:6px;width:100%;background:none;border:0;border-radius:6px;padding:7px 8px;text-align:left;color:#7fb2ff;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.sech:hover{background:#202734}.sech .ttl{flex:0 0 auto;font-weight:600}.sech .sum{flex:1 1 auto;text-align:right;color:#8c98ab;text-transform:none;letter-spacing:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sech .chev{flex:0 0 auto;color:#6c7a90;transition:transform .15s}.sec.open .sech .chev{transform:rotate(90deg)}.sec.open .sech .sum{display:none}
+.secb{display:none;padding:0 8px 8px}.sec.open .secb{display:block}
+.secb details.grp{border-top:1px dashed #2a303b;margin:6px 0 2px;padding-top:4px}.secb details.grp>summary{color:#9fb6d8;font-size:11px}
+#uiTools{display:flex;gap:4px;align-items:center;margin:2px 0 6px}#uiTools input{flex:1 1 auto;min-width:0;background:#11151b;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:5px 7px;font:inherit}
+#uiTools button{flex:0 0 auto;padding:4px 6px}
+body.nonotes aside small{display:none}
+.ff-hide{display:none!important}
+</style></head><body><div id="app">
 <aside>
 <h2>Foam belts</h2>
 <div class="row"><label>Foam type</label><select id="foamType" style="grid-column:2/4"></select></div>
@@ -2275,6 +2287,85 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
   })();
   restoreLast();
   requestAnimationFrame(frame);
+})();
+</script>
+<script>
+/* FoamFeed UI organiser: groups each panel heading and its controls into a collapsible card (open/closed state kept in
+   this browser), orders them by how often they are used, tucks rarely-touched settings into sub-groups, adds a
+   settings search and a notes toggle. Pure layout: every control keeps its id and behaviour. */
+(function () {
+  const $ = id => document.getElementById(id), KEY = 'ffUI1';
+  let st = {}; try { st = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} };
+  const toast = $('ffToast'); if (toast) document.body.appendChild(toast);
+  const ORDER = { L: ['Pills', 'Drive', 'Sensors & feed control', 'Vibration (speaker)', 'Foam belts', 'Belt layout', 'Hopper throat', 'Belt texture', 'Geometry'],
+                  R: ['Dispensing', 'Pill loads', 'Dust', 'Tack', 'Belts', 'View', 'Simulation', 'Trial runner'] };
+  const OPEN = new Set(['Pills', 'Drive', 'Sensors & feed control', 'Dispensing', 'Pill loads']);
+  const txt = id => { const e = $(id); return e ? (e.tagName === 'SELECT' ? (e.options[e.selectedIndex] || {}).text || '' : e.value != null && e.tagName === 'INPUT' ? e.value : e.textContent).trim() : ''; };
+  const S_ = () => (window.__FF && window.__FF.S) || {};
+  const SUM = {
+    'Pills': () => { const p = S_().pill || {}; return `${p.shape || ''} ${p.shape === 'tablet' || p.shape === 'sphere' ? p.W : (p.L || '') + '×' + p.W} mm · ${txt('pMat').split(' (')[0]} · ${S_().count} pills`; },
+    'Drive': () => `${txt('rpm')} rpm`,
+    'Sensors & feed control': () => txt('r_ct'),
+    'Vibration (speaker)': () => /ON/.test(txt('vibBtn')) ? `ON · ${txt('vibF')} Hz · ${txt('vibA')} g` : 'off',
+    'Foam belts': () => `${txt('foamType')} · ${txt('thick')} mm`,
+    'Belt layout': () => `${txt('geoW')} mm wide`,
+    'Hopper throat': () => $('thOn') && $('thOn').checked ? `custom ${txt('thW')} mm` : 'CAD',
+    'Belt texture': () => /^smooth/i.test(txt('texInfo')) ? 'smooth' : 'textured',
+    'Geometry': () => { const c = txt('camShape'); return (/pick/.test(c) ? 'CAD cam' : c) + (/original/i.test(txt('hopInfo')) || !txt('hopInfo') ? '' : ' · custom container'); },
+  };
+  const sections = [];
+  for (const aside of document.querySelectorAll('#app > aside')) {
+    const side = aside.classList.contains('r') ? 'R' : 'L', secs = []; let cur = null;
+    for (const n of [...aside.childNodes]) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { title: n.textContent.trim(), nodes: [] }; secs.push(cur); n.remove(); }
+      else if (cur) cur.nodes.push(n);
+    }
+    const ord = ORDER[side]; secs.sort((a, b) => (ord.indexOf(a.title) + 1 || 99) - (ord.indexOf(b.title) + 1 || 99));
+    for (const c of secs) {
+      const sec = document.createElement('section'); sec.className = 'sec'; sec.dataset.t = c.title;
+      const h = document.createElement('button'); h.type = 'button'; h.className = 'sech'; h.innerHTML = '<span class="chev">▸</span><span class="ttl"></span><span class="sum"></span>'; h.querySelector('.ttl').textContent = c.title;
+      const body = document.createElement('div'); body.className = 'secb'; for (const n of c.nodes) body.appendChild(n);
+      sec.append(h, body); aside.appendChild(sec);
+      const open = st[c.title] != null ? st[c.title] : OPEN.has(c.title); sec.classList.toggle('open', open);
+      h.onclick = () => { const o = !sec.classList.contains('open'); sec.classList.toggle('open', o); st[c.title] = o; save(); };
+      sections.push({ sec, side, title: c.title });
+    }
+  }
+  // rarely-touched settings into sub-groups
+  function group(secTitle, label, firstId, lastId) {
+    const s = sections.find(x => x.title === secTitle); if (!s) return; const body = s.sec.querySelector('.secb');
+    const kids = [...body.children], top = el => { while (el && el.parentElement !== body) el = el.parentElement; return el; };
+    const a = top($(firstId)), b = top($(lastId)); if (!a || !b) return; const i = kids.indexOf(a), j = kids.indexOf(b); if (i < 0 || j < i) return;
+    const d = document.createElement('details'); d.className = 'grp'; d.innerHTML = '<summary></summary>'; d.firstChild.textContent = label;
+    body.insertBefore(d, a); for (const k of kids.slice(i, j + 1)) d.appendChild(k);
+  }
+  group('Pills', 'Surface & physics (density, friction, bounce)', 'pDen', 'pRest');
+  group('Sensors & feed control', 'Feed timing (stop delay, ramp, timeout, gap)', 'ctDelay', 'ctVib');
+  group('Sensors & feed control', 'Sensor setup (S1–S3: position, beam, timing)', 'snSel', 'snEdge');
+  // toolbar: search + expand/collapse + notes
+  const left = document.querySelector('#app > aside:not(.r)'), bar = document.createElement('div'); bar.id = 'uiTools';
+  bar.innerHTML = '<input id="uiFind" type="search" placeholder="Find a setting…"><button id="uiOpen" title="open every section">⊞</button><button id="uiClose" title="close every section">⊟</button><button id="uiNotes" title="show / hide the explanation notes">ⓘ</button>';
+  left.insertBefore(bar, left.firstChild);
+  const setAll = o => { for (const x of sections) { x.sec.classList.toggle('open', o); st[x.title] = o; } save(); };
+  $('uiOpen').onclick = () => setAll(true); $('uiClose').onclick = () => setAll(false);
+  if (st.__notes === false || st.__notes == null) document.body.classList.add('nonotes');
+  $('uiNotes').onclick = () => { const off = document.body.classList.toggle('nonotes'); st.__notes = !off; save(); };
+  $('uiFind').oninput = () => {
+    const q = $('uiFind').value.trim().toLowerCase();
+    for (const x of sections) {
+      const body = x.sec.querySelector('.secb'), items = body.querySelectorAll('.row, .kv > b, .btns, details.grp');
+      if (!q) { x.sec.classList.remove('ff-hide'); x.sec.classList.toggle('open', st[x.title] != null ? st[x.title] : OPEN.has(x.title)); body.querySelectorAll('.ff-hide').forEach(e => e.classList.remove('ff-hide')); continue; }
+      const tmatch = x.title.toLowerCase().includes(q); let any = tmatch;
+      body.querySelectorAll('.row, .btns').forEach(r => { const hit = tmatch || (r.textContent + ' ' + [...r.querySelectorAll('[title]')].map(e => e.title).join(' ')).toLowerCase().includes(q); r.classList.toggle('ff-hide', !hit); if (hit) { any = true; const d = r.closest('details'); if (d) d.open = true; } });
+      x.sec.classList.toggle('ff-hide', !any); x.sec.classList.toggle('open', any);
+    }
+  };
+  // one-line summaries on closed cards
+  function sums() { for (const x of sections) { if (x.sec.classList.contains('open')) continue; let t = '';
+      try { t = SUM[x.title] ? SUM[x.title]() : (() => { const kv = x.sec.querySelector('.kv'); if (!kv) return ''; const b = kv.querySelector('b'), sp = kv.querySelector('span'); return b && sp && sp.textContent ? `${b.textContent} ${sp.textContent}` : ''; })(); } catch (e) {}
+      x.sec.querySelector('.sum').textContent = t || ''; } }
+  sums(); setInterval(sums, 500);
 })();
 </script>
 </body></html>
