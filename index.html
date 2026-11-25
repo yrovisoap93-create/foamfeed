@@ -83,7 +83,8 @@ body.nonotes aside small{display:none}
 <details><summary>How vibration is modelled</summary><small>The whole cartridge (hopper, plate, belts) is shaken rigidly and sinusoidally; in the cartridge's frame that is an oscillating extra gravity on every pill, so lift-off, bouncing and walking along the walls all come out of the normal contact physics. Strength is peak acceleration; above ~1 g pills briefly leave the surfaces each cycle. A 23 mm speaker at 40 Hz is far below its resonance and moves very little air — the real transmitted acceleration depends on how it is coupled to the frame, so measure it (phone accelerometer app on the cartridge) and set Strength to match.</small></details>
 <h2>Sensors &amp; feed control</h2>
 <div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="continuous">Continuous (belts always run)</option><option value="feed">Feed on demand (sensor stops it)</option></select></div>
-<div class="btns"><button id="btnFeed" title="run the conveyor (and vibrator) until the stop sensor sees a pill">▶ Feed pill</button><button id="btnFeedN" title="run the conveyor until the stop sensor has counted this many pills, then stop">Feed ×</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:52px"><button id="btnFeedStop">■ Stop</button></div>
+<div class="row"><label for="ctN" title="how many pills one press of Dispense delivers">How many pills</label><span style="grid-column:2/4;display:flex;gap:6px;align-items:center"><button id="ctNm" title="one fewer" style="width:34px">−</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:56px;text-align:center"><button id="ctNp" title="one more" style="width:34px">+</button></span></div>
+<div class="btns"><button id="btnFeed" class="pri" style="flex:2" title="open the gate, run the conveyor (and vibrator) until the exit sensor has counted the number of pills set above, then stop">▶ Dispense 1 pill</button><button id="btnFeedN" style="display:none"></button><button id="btnFeedStop">■ Stop</button></div>
 <div class="kv"><b>Controller</b><span id="r_ct"></span><b>Sensors</b><span id="r_sens"></span><b>Last feed</b><span id="r_feed"></span><b>Feeds</b><span id="r_feeds"></span><b>Time to pill</b><span id="r_ttp"></span></div>
 <div class="row"><label for="ctBack" title="after the stop sensor counts a pill (and the stop delay), run the belts backwards a short distance to pull the next pill back from the nip">Backup after count</label><input type="checkbox" id="ctBack" style="justify-self:start"></div>
 <div class="row"><label for="ctBackMm" title="belt surface travel in reverse">Backup distance</label><input type="range" id="ctBackMm" min="0.2" max="10" step="0.1" value="2"><span class="v"><span id="ctBackMmV">2</span> mm</span></div>
@@ -1977,7 +1978,7 @@ body.nonotes aside small{display:none}
   }
   function syncCtrlUI() {
     const c = ctS(), sn = c.sensors[c.sel];
-    $('ctMode').value = c.mode; $('ctN').value = c.n; $('ctVib').checked = !!c.vib_with_motor; $('snSel').value = c.sel;
+    $('ctMode').value = c.mode; $('ctN').value = c.n; $('btnFeed').textContent = `▶ Dispense ${c.n} pill${c.n === 1 ? '' : 's'}`; $('ctVib').checked = !!c.vib_with_motor; $('snSel').value = c.sel;
     $('ctBack').checked = !!c.backup; $('gtWaitOpen').checked = c.wait_gate !== false; for (const [id, v] of [['gtClose', c.gate_close_ms], ['gtWait', c.gate_wait_s], ['gtTrav', c.gate_travel_deg ?? 77.2], ['gtSpd', c.gate_speed], ['ctBackMm', c.backup_mm], ['ctBackV', c.backup_mm_s], ['ctLash', c.backlash_deg], ['ctDelay', c.stop_delay_ms], ['ctRamp', c.ramp_ms], ['ctTimeout', c.timeout_s], ['ctGap', c.gap_ms], ['snSide', sn.side_mm], ['snBeam', sn.beam_mm], ['snResp', sn.response_ms], ['snMin', sn.min_block_ms]]) { $(id).value = v; $(id + 'V').textContent = v; }
     { const z = sn.zone || 'exit', e = $('snBelow'), R = z === 'entry' ? [-10, 20, 0.5] : z === 'gate' ? [1, 7, 0.5] : [5, 40, 0.5], v = z === 'exit' ? sn.below_mm : (sn.pos_mm ?? (z === 'gate' ? 4 : 0));
       e.min = R[0]; e.max = R[1]; e.step = R[2]; e.value = v; $('snBelowV').textContent = v; $('snBelowL').textContent = z === 'entry' ? 'Position (above top idler)' : z === 'gate' ? 'Position (below gate)' : 'Position (down chute)'; }
@@ -1999,11 +2000,14 @@ body.nonotes aside small{display:none}
   $('ctMode').onchange = () => { ctS().mode = $('ctMode').value; applyCtrl(); syncCtrlUI(); };
   $('ctVib').onchange = () => { ctS().vib_with_motor = $('ctVib').checked; applyCtrl(); };
   // backup only makes sense after a single pill: grey it out while the multi-pill count is above 1
-  function backUI() { const multi = (ctS().n || 1) > 1; for (const id of ['ctBack', 'ctBackMm', 'ctBackV']) { const e = $(id); e.disabled = multi; const r = e.closest('.row'); if (r) { r.style.opacity = multi ? 0.4 : ''; r.title = multi ? 'Backup only runs after single-pill feeds — set the Feed × count to 1 to use it' : ''; } } }
-  $('ctN').onchange = $('ctN').oninput = () => { ctS().n = Math.max(1, Math.round(+$('ctN').value) || 1); backUI(); };
+  function backUI() { const multi = (ctS().n || 1) > 1; for (const id of ['ctBack', 'ctBackMm', 'ctBackV']) { const e = $(id); e.disabled = multi; const r = e.closest('.row'); if (r) { r.style.opacity = multi ? 0.4 : ''; r.title = multi ? 'Backup only runs after single-pill feeds — set How many pills to 1 to use it' : ''; } } }
+  const dispLbl = () => { const n = ctS().n; $('btnFeed').textContent = `▶ Dispense ${n} pill${n === 1 ? '' : 's'}`; };
+  $('ctN').onchange = $('ctN').oninput = () => { ctS().n = Math.max(1, Math.round(+$('ctN').value) || 1); backUI(); dispLbl(); };
+  const stepN = d => { const n = Math.max(1, Math.min(1000, ctS().n + d)); ctS().n = n; $('ctN').value = n; backUI(); dispLbl(); };
+  $('ctNm').onclick = () => stepN(-1); $('ctNp').onclick = () => stepN(1);
   // pressing a Feed button in Continuous mode switches to Feed on demand (belts stop, then the feed starts)
   function feedReq(n) { if (ctS().mode !== 'feed') { ctS().mode = 'feed'; applyCtrl(); syncCtrlUI(); } const C = sim.ctrl; if (C) { C.needs.push(n); C.queue++; } }
-  $('btnFeed').onclick = () => feedReq(1);
+  $('btnFeed').onclick = () => feedReq(ctS().n);
   $('btnFeedN').onclick = () => feedReq(ctS().n);
   $('btnFeedStop').onclick = () => { const C = sim.ctrl; if (!C) return; C.queue = 0; C.needs.length = 0; if (C.state !== 'idle') { C.state = 'idle'; if (C.cur) { C.cur.tStop = sim.t; C.cur.aborted = true; } C.tNext = sim.t; } };
   function ctrlReadouts() {
