@@ -48,8 +48,8 @@ body.nonotes aside small{display:none}
 <aside>
 <h2>Foam belts</h2>
 <div class="row"><label>Foam type</label><select id="foamType" style="grid-column:2/4"></select></div>
-<div class="row"><label for="shore" title="scales modulus: E = 9.8 kPa x exp(0.052 x S00) x material factor">Hardness (Shore 00)</label><input type="range" id="shore" min="20" max="95" step="1" value="50"><span class="v"><span id="shoreV"></span></span></div>
-<div class="row"><label for="thick" title="foam layer over the idler bearings / cam. 4.0 mm matches the CAD">Foam thickness</label><input type="range" id="thick" min="1" max="5.5" step="0.1" value="4"><span class="v"><span id="thickV"></span> mm</span></div>
+<div class="row"><label for="shore" title="scales modulus: E = 9.8 kPa x exp(0.052 x S00) x material factor">Hardness (Shore 00)</label><input type="range" id="shore" min="20" max="95" step="1" value="40"><span class="v"><span id="shoreV"></span></span></div>
+<div class="row"><label for="thick" title="foam layer over the idler bearings / cam. 4.0 mm matches the CAD">Foam thickness</label><input type="range" id="thick" min="1" max="5.5" step="0.1" value="4.5"><span class="v"><span id="thickV"></span> mm</span></div>
 <div class="note" id="ild" style="margin:4px 0"></div>
 <canvas id="cSS" class="ch" width="300" height="110"></canvas>
 <small>blue = loading curve, orange dashed = unloading (hysteresis)</small>
@@ -70,6 +70,17 @@ body.nonotes aside small{display:none}
 <div class="row"><label for="thFront" title="front wall leans out from the back plate by this angle (CAD ≈ 41°). Steep walls end in a sloped chamfer so pills can't park on a ledge">Front wall angle</label><input type="range" id="thFront" min="0" max="70" step="1" value="41"><span class="v"><span id="thFrontV"></span>°</span></div>
 <div class="note" id="thInfo" style="margin:4px 0"></div>
 <div class="btns"><button id="thReset">Reset throat</button></div>
+<h2>Singulator (bump at the entry)</h2>
+<small>An optional rigid knob just above the top of the rollers that pills have to pass one at a time. Every setting updates live while the sim runs.</small>
+<div class="row"><label for="sgOn" title="add the knob">Singulator</label><input type="checkbox" id="sgOn" style="justify-self:start"></div>
+<div class="row"><label for="sgAxis" title="peg = sticks straight out of the back plate toward the glass; bar across = lies across the belts (left-right); bar along = runs up the incline">Shape</label><select id="sgAxis" style="grid-column:2/4"><option value="v">Peg out of the back plate</option><option value="x">Bar across the belts</option><option value="u">Bar along the incline</option></select></div>
+<div class="row"><label for="sgU" title="height of the knob centre above the top idler centres (the foam on the top rollers reaches ~9.5 mm)">Height above top idlers</label><input type="range" id="sgU" min="0" max="30" step="0.25" value="11"><span class="v"><span id="sgUV">11</span> mm</span></div>
+<div class="row"><label for="sgX" title="sideways offset from the centre of the nip (+ toward belt B)">Side offset</label><input type="range" id="sgX" min="-10" max="10" step="0.25" value="0"><span class="v"><span id="sgXV">0</span> mm</span></div>
+<div class="row"><label for="sgV" title="peg: where it starts, measured out from the back plate. Bars: their distance from the back plate">Out from back plate</label><input type="range" id="sgV" min="0" max="8" step="0.25" value="0"><span class="v"><span id="sgVV">0</span> mm</span></div>
+<div class="row"><label for="sgLen" title="peg: how far it sticks out; bars: their length. 0 = a ball">Length</label><input type="range" id="sgLen" min="0" max="20" step="0.25" value="3"><span class="v"><span id="sgLenV">3</span> mm</span></div>
+<div class="row"><label for="sgR" title="radius of the knob (round tip)">Radius</label><input type="range" id="sgR" min="0.25" max="6" step="0.25" value="1.5"><span class="v"><span id="sgRV">1.5</span> mm</span></div>
+<div class="row"><label for="sgMu" title="sliding friction between pill and knob (PTFE ~0.1, polished metal / acetal ~0.2, PLA ~0.35, rubber 0.8+)">Friction</label><input type="range" id="sgMu" min="0" max="1.2" step="0.02" value="0.3"><span class="v"><span id="sgMuV">0.3</span></span></div>
+<div class="kv"><b>Knob contacts</b><span id="r_sing">—</span></div>
 <h2>Drive</h2>
 <div class="row"><label for="rpm" title="both cams are tied by the worm; sign flips the belt direction">Cam speed</label><input type="range" id="rpm" min="-60" max="60" step="0.5" value="12"><span class="v"><span id="rpmV"></span> rpm</span></div>
 <div class="row"><label for="camPhase" title="phase offset of the second cam (0 = mirrored, both pinch together)">Cam B phase</label><input type="range" id="camPhase" min="-180" max="180" step="5" value="0"><span class="v"><span id="camPhaseV"></span>°</span></div>
@@ -98,7 +109,8 @@ body.nonotes aside small{display:none}
 <div class="kv"><b>Controller</b><span id="r_ct"></span><b>Sensors</b><span id="r_sens"></span><b>Last feed</b><span id="r_feed"></span><b>Feeds</b><span id="r_feeds"></span><b>Time to pill</b><span id="r_ttp"></span></div>
 <div class="row"><label for="pbOn" title="S1 measures every pill's length from belt travel while it blocks the beam (between the drive wheels a gripped pill moves at belt speed). The host knows which pill is in this cartridge and its size from the pill database; a block longer than the pill can be in any orientation means two pills stacked/touching: the belts reverse until everything in the conveyor is back in the hopper, then the feed tries again">Stacked-double check (S1)</label><input type="checkbox" id="pbOn" checked style="justify-self:start"></div>
 <div class="row"><label for="pbTol" title="allowance over the pill's largest dimension before a block counts as two pills. Percent, because pills slip a little against the belt (round wheel: caplets read ~15% long, tablets ~15% short); a stacked double reads close to 2x">Length tolerance</label><input type="range" id="pbTol" min="5" max="80" step="5" value="30"><span class="v"><span id="pbTolV">30</span> %</span></div>
-<div class="row"><label for="pbGap" title="if the next pill is closer than this behind the last called pill at S1, treat it as a double too (reverse and retry). 0 = off">Min gap behind called pill</label><input type="range" id="pbGap" min="0" max="10" step="0.5" value="0"><span class="v"><span id="pbGapV">0</span> mm</span></div>
+<div class="row"><label for="pbGap" title="the pill right behind the dose must trail it by at least this much belt travel (measured at S1), or it counts as a nose-to-tail double (reverse and retry). 0 = auto: the belt travel while the gate shuts + 1.5 mm">Min gap behind the dose (0 = auto)</label><input type="range" id="pbGap" min="0" max="15" step="0.5" value="0"><span class="v"><span id="pbGapV">0</span> mm</span></div>
+<div class="kv"><b title="gap S1 measured between the last two pills (belt travel), and the gap the controller requires behind a dose">S1 gap</b><span id="r_gap">—</span></div>
 <div class="row"><label for="pbTries" title="reverse-and-retry cycles before giving up with a jam fault">Max retries</label><input type="range" id="pbTries" min="1" max="20" step="1" value="10"><span class="v"><span id="pbTriesV">10</span></span></div>
 <div class="kv"><b title="last pill measured at S1 vs the largest dimension of the cartridge's pill">S1 length</b><span id="r_probe">—</span></div>
 <div class="row"><label for="ctBack" title="after the stop sensor counts a pill (and the stop delay), run the belts backwards a short distance to pull the next pill back from the nip">Backup after count</label><input type="checkbox" id="ctBack" style="justify-self:start"></div>
@@ -110,12 +122,14 @@ body.nonotes aside small{display:none}
 <div class="row"><label for="ctGap" title="pause between queued feeds">Gap between feeds</label><input type="range" id="ctGap" min="0" max="3000" step="50" value="300"><span class="v"><span id="ctGapV">300</span> ms</span></div>
 <div class="row"><label for="ctLash" title="free play in the worm 20:1 + pulley drive, as degrees at the belt drive shaft. After any reversal the motor turns through this before the belts move (delay = play ÷ shaft speed). Printed / plastic worm sets ~0.5–2°, machined ~0.1°">Gear backlash</label><input type="range" id="ctLash" min="0" max="3" step="0.05" value="0.5"><span class="v"><span id="ctLashV">0.5</span>°</span></div>
 <div class="row"><label for="ctVib" title="the speaker is switched with the motor: it only shakes while the conveyor runs (needs Vibration ON above)">Vibrate only while conveyor runs</label><input type="checkbox" id="ctVib" checked style="justify-self:start"></div>
+<div class="row"><label for="ctVibS1" title="the vibrator only runs until S1 has seen the called pill(s); once the dose is in the conveyor the shaking stops so it cannot shake a second pill in behind it. Needs S1 on (otherwise the vibrator follows the motor)">Vibrate only until S1 sees the pill</label><input type="checkbox" id="ctVibS1" checked style="justify-self:start"></div>
 <div class="row"><label for="gtOpenOn" title="the gate is the chamber's air seal: every second it is open lets room air (humidity) in. 'When the pill reaches S2' keeps it shut while the belts bring the pill down and opens it only when the pill arrives at the conveyor exit; the pill rests on the gate for the ~0.08 s the servo needs and drops as it slides away">Gate opens</label><select id="gtOpenOn" style="grid-column:2/4"><option value="jit">after S2, just in time (S1 length) — air seal</option><option value="s2">as soon as the pill reaches S2</option><option value="call">when the pill is called</option></select></div>
 <div class="row"><label for="gtWaitOpen" title="only with 'when the pill is called': start the belts once the gate is fully open">Start belts after gate opens</label><input type="checkbox" id="gtWaitOpen" checked style="justify-self:start"></div>
 
 <div class="row"><label for="gtSnap" title="if the exit sensor (S2) counts more pills than were called, the servo snaps the gate shut at once and holds the extra on it. The next call opens only the gate to release it (S3 confirms); the belts run only if S3 sees nothing. An extra that still gets past the gate and is seen by S3 counts as dispensed">Snap gate shut on double</label><input type="checkbox" id="gtSnap" checked style="justify-self:start"></div>
 <div class="kv"><b title="from the sensor timing: S2→S3 transit (measured), when a pill detected at S2 reaches the gate, and how long the servo needs to move the gate across the drop path">Catch window</b><span id="r_win">—</span></div>
 <div class="row"><label for="gtRel" title="when releasing a held pill: how long to wait, after the gate is fully open, for S3 to see it fall before starting the belts">Release wait for S3</label><input type="range" id="gtRel" min="0.1" max="3" step="0.1" value="0.5"><span class="v"><span id="gtRelV">0.5</span> s</span></div>
+<div class="row"><label for="gtLead" title="open the gate this much earlier than the just-in-time estimate (pill tail leaving the conveyor minus the servo's open time). Raise it if pills land on a half-open gate. Works with 'after S2, just in time'">Open early (servo lead)</label><input type="range" id="gtLead" min="0" max="400" step="5" value="30"><span class="v"><span id="gtLeadV">30</span> ms</span></div>
 <div class="row"><label for="gtClose" title="the gate starts closing when the controller predicts the called pill's top end is halfway through the gate (from the S2 block time, belt speed and the conveyor-to-gate drop); this adds extra time on top of that">Close margin</label><input type="range" id="gtClose" min="0" max="100" step="1" value="10"><span class="v"><span id="gtCloseV">10</span> ms</span></div>
 <div class="row"><label for="gtWait" title="safety fallback: if a counted pill never reaches the Out sensor (stuck in the chute, or two pills fell through as one beam break), close the gate this long after the last sensor activity and log it as missed. Also the close time when the Out sensor is switched off">Out sensor wait</label><input type="range" id="gtWait" min="0.5" max="15" step="0.5" value="3"><span class="v"><span id="gtWaitV">3</span> s</span></div>
 <div class="row"><label for="gtTrav" title="production gate: closes against the 13 mm ramped front block and slides back this far to open the drop path (17 mm in the production design). The servo angle needed comes from your linkage">Gate stroke</label><input type="range" id="gtTrav" min="5" max="20" step="0.5" value="17"><span class="v"><span id="gtTravV">17</span> mm</span></div>
@@ -129,7 +143,8 @@ body.nonotes aside small{display:none}
 <div class="row"><label for="snAxis">Beam direction</label><select id="snAxis" style="grid-column:2/4"><option value="frontback">front-to-back (through the glass)</option><option value="across">across (belt A side to belt B side)</option></select></div>
 <div class="row"><label for="snBeam" title="effective beam diameter (emitter/receiver aperture). Typical slotted IR sensor ~1 mm">Beam Ø</label><input type="range" id="snBeam" min="0.3" max="5" step="0.1" value="1"><span class="v"><span id="snBeamV">1</span> mm</span></div>
 <div class="row"><label for="snResp" title="sensor + input delay from beam change to the controller seeing it">Response time</label><input type="range" id="snResp" min="0" max="20" step="0.1" value="0.5"><span class="v"><span id="snRespV">0.5</span> ms</span></div>
-<div class="row"><label for="snMin" title="the beam must stay blocked at least this long to count as a pill (rejects grazes / dust flicker)">Min block time</label><input type="range" id="snMin" min="0" max="30" step="0.5" value="1"><span class="v"><span id="snMinV">1</span> ms</span></div>
+<div class="row"><label for="snMin" title="the beam must stay blocked at least this long to count as a pill (rejects grazes / dust flicker)">Min block time</label><input type="range" id="snMin" min="0" max="30" step="0.5" value="1"><span class="v"><span id="snMinV">1</span> ms</span></div><div class="row"><label for="snClr" title="debounce: the beam must stay clear at least this long before the pill counts as gone. A pill rocking at the edge of the beam (vibration, a caplet pinned at the nip) flickers it; without this every flicker would count as another pill">Min clear time</label><input type="range" id="snClr" min="0" max="30" step="0.5" value="5"><span class="v"><span id="snClrV">5</span> ms</span></div>
+
 <div class="row"><label for="snEdge" title="count when the beam is broken (fastest) or when it clears again (pill fully past)">Count on</label><select id="snEdge" style="grid-column:2/4"><option value="break">beam break</option><option value="clear">beam clear (pill past)</option></select></div>
 <small>S1 Length probe sits across the belt gap inside the conveyor (default 22 mm above the bottom idler) and measures each pill's length from belt travel, S2 Exit in the exit chute (stops the feed, marked *), S3 Out under the gate. Beams are drawn as red lines (bright when blocked). Sensors also count in Continuous mode.</small>
 <h2>Belt texture</h2>
@@ -171,7 +186,7 @@ body.nonotes aside small{display:none}
 <div class="row"><label for="pMuF" title="base coefficient; the foam grip factor and squeeze multiply it">Friction vs foam</label><input type="range" id="pMuF" min="0.05" max="2" step="0.05" value="0.6"><span class="v"><span id="pMuFV"></span></span></div>
 <div class="row"><label for="pMuH" title="pill-pill and pill-hopper friction">Friction vs hard</label><input type="range" id="pMuH" min="0.05" max="1" step="0.05" value="0.35"><span class="v"><span id="pMuHV"></span></span></div>
 <div class="row"><label for="pRest" title="">Bounciness</label><input type="range" id="pRest" min="0" max="0.9" step="0.05" value="0.35"><span class="v"><span id="pRestV"></span></span></div>
-<div class="row"><label for="count" title="">Pill count</label><input type="range" id="count" min="5" max="150" step="1" value="40"><span class="v"><span id="countV"></span></span></div>
+<div class="row"><label for="count" title="">Pill count</label><input type="range" id="count" min="1" max="150" step="1" value="10"><span class="v"><span id="countV"></span></span></div>
 <div class="btns"><button class="pri" id="btnTrial">Dump new load</button><button id="btnFill">Add pills</button><button id="btnClear">Clear</button></div>
 <small>Changing shape, size or density rebuilds the load; friction changes are live.</small>
 </aside>
@@ -199,7 +214,10 @@ body.nonotes aside small{display:none}
 <h2>Dust</h2>
 <div class="kv"><b>Generated</b><span id="r_dust"></span><b>Per pill out</b><span id="r_dustPP"></span><b>Where</b><span id="r_dustW"></span><b>Worst pill</b><span id="r_dustPk"></span></div>
 <div class="row"><label for="dustShow" title="draw the dust as it is shed (1 speck per 100 ng); specks settle at ~15 mm/s onto the first surface below and stay (the newest 20 000 are kept); specks on a belt ride with it">Show dust</label><input type="checkbox" id="dustShow" checked style="justify-self:start"></div>
-<small>Abrasion + chipping: mass shed in proportion to the energy dissipated at each pill's contacts, calibrated to the pill's friability (USP 1216 drum test). Gelatin capsules and softgels shed none. Dust does not yet change friction.</small>
+<div class="kv"><b title="largest share of a pill's belt contact covered by dust this step">Belt dust film</b><span id="r_dustTh"></span></div>
+<div class="row"><label for="dustTack" title="dust that settles on the belts covers part of the foam: covered area loses the foam's tack and grips at ~35% of clean foam (powder lubricates). Pills pressed into the foam pick some dust back up">Dust lowers belt grip</label><input type="checkbox" id="dustTack" checked style="justify-self:start"></div>
+<div class="row"><label for="dustStatic" title="static charge clumps the fines together (bigger clumps cover less area for the same mass, and fall as clumps). Stronger in dry air — the desiccated chamber's RH sets it">Static clumping</label><input type="range" id="dustStatic" min="0" max="3" step="0.1" value="1"><span class="v"><span id="dustStaticV">1</span>×</span></div>
+<small>Abrasion + chipping: mass shed in proportion to the energy dissipated at each pill's contacts, calibrated to the pill's friability (USP 1216 drum test). Gelatin capsules and softgels shed none. Dust on the belts lowers grip and tack by the area it covers; static clumps it (more in dry air).</small>
 <div class="btns"><button id="btnDust">Reset dust</button></div>
 <h2>Tack</h2>
 <div class="kv"><b>Pill tack</b><span id="r_tk"></span><b>Bond number</b><span id="r_bond"></span><b>Held &gt; weight</b><span id="r_cling"></span><b>Strongest hold</b><span id="r_tkMax"></span></div>
@@ -566,6 +584,8 @@ body.nonotes aside small{display:none}
     thickness: 4e-3,         // foam layer thickness h
     camBump: 1,              // 1 = real cam lobe geometry, 0 = off
     tireE: 0,                // drive-wheel tire modulus (Pa); 0 = rigid wheel (PLA / metal)
+    dustTack: 1,             // 1 = dust on the belt lowers its grip / tack (0 = ignore the film)
+    dustStatic: 1,           // static agglomeration strength of the dust (0 = no clumping)
     tireT: 2e-3,             // drive-wheel tire thickness (m), part of the wheel radius
     phaseB: 0,               // cam B phase offset (rad)
     muFoamScale: 1,
@@ -839,8 +859,10 @@ body.nonotes aside small{display:none}
     sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; sim.stats.escaped = 0; sim.stats.gateOpenS = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); sim.cells.dust[b].fill(0); } sim.wearT = 0; };
     { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; }   // pills leave the model 5 mm below the lowest shell surface
-    sim.dustFx = { cap: 20000, head: 0, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000) };
+    sim.dustFx = { cap: 20000, head: 0, rs: 12345, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000) };
     sim.addPills = function (n, region) { return addPills(sim, n, region); };
+    sim.setSingulator = function (o) { const old = sim.sing; sim.sing = singFrame(sim, o); if (sim.sing && old) { sim.sing.hits = old.hits; sim.sing.Fpk = old.Fpk; } sim.singOpts = o ? Object.assign({}, o) : null; return sim.sing; };
+    if (opts.singulator) sim.setSingulator(opts.singulator);
     sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) stepOnce(sim); };
     sim.beltSpeed = () => P.rpm * TAU / 60 * P.driveRadius;
     sim.nipGap = function () {
@@ -858,7 +880,7 @@ body.nonotes aside small{display:none}
       type: [], alive: new Uint8Array(cap), nc: new Uint16Array(cap), ncp: new Uint16Array(cap), id: new Int32Array(cap), exitT: new Float64Array(cap).fill(-1), hue: new Float32Array(cap), seq: 0,
       // contact load bookkeeping (normal forces only): per-step sums, then filtered squeeze / pressure and their run peaks
       lS: new Float64Array(cap), lX: new Float64Array(cap), lY: new Float64Array(cap), lZ: new Float64Array(cap), pM: new Float64Array(cap),
-      dm: new Float64Array(cap), aS: new Float64Array(cap), aF: new Float64Array(cap), sq: new Float64Array(cap), sqPk: new Float64Array(cap), pr: new Float64Array(cap), prPk: new Float64Array(cap), xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9) };
+      dm: new Float64Array(cap), aS: new Float64Array(cap), aF: new Float64Array(cap), sq: new Float64Array(cap), sqPk: new Float64Array(cap), pr: new Float64Array(cap), prPk: new Float64Array(cap), xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9), xiK: new Float64Array(cap * 64 * 3), xiKS: new Int32Array(cap * 64).fill(-9) };
   }
 
   function addPills(sim, n, region) {
@@ -1051,7 +1073,8 @@ body.nonotes aside small{display:none}
     let SX = 0, SU = 0, SV = 0, AXx = 0, AXy = 0, AXz = 0, AUx = 0, AUy = 0, AUz = 0, AVx = 0, AVy = 0, AVz = 0;   // patch-normal force sums (belt frame) + their moments
     const dvc = sim.W / cl.nv, cellA = cl.dq * dvc, wearX = P.wearX > 0 ? P.wearX : 1;
     // one foam "spring" per surface patch: local compression -> stress (with hysteresis/viscosity) x patch area
-    const tireK = P.tireE > 0 && P.tireT > 0 ? P.tireE / P.tireT : 0, bulge = Rback - Rb; let tireGive = 0;   // tire stiffness per area (Pa/m)
+    const tireK = P.tireE > 0 && P.tireT > 0 ? P.tireE / P.tireT : 0, bulge = Rback - Rb; let tireGive = 0;
+    const dArr = cl.dust[belt], dOn = P.dustTack > 0, sA = dOn ? dustAgg(sim) : 0; let thA = 0;   // dust film on the belt (see dustCover)   // tire stiffness per area (Pa/m)
     const patch = (dloc, qq, vv, dA, hT) => {
       qq = ((qq % cl.perim) + cl.perim) % cl.perim; let iq = Math.floor(qq / cl.dq); if (iq >= cl.nq) iq = cl.nq - 1; let iv = Math.floor(vv / dvc); if (iv < 0) iv = 0; if (iv >= cl.nv) iv = cl.nv - 1;
       const c = iq * cl.nv + iv, ep = ci[c] + cv[c];
@@ -1069,6 +1092,7 @@ body.nonotes aside small{display:none}
       Fv += f.E * f.tauV * edot * dA;
       const dF = sgm * dA + (stop > 0 ? P.contactFreq * P.contactFreq * T.mass * stop * dA / Math.max(T.surfArea * 0.25, dA) : 0);
       Fn += dF; epsAcc += e * dA; nAct += dA; a2 += dA / PI; if (dF > pMax * dA) pMax = dF / dA;
+      if (dOn && dArr[c] > 0) { thA += dustCover(dArr[c], cellA, sA) * dA; if (e > 0.02) dArr[c] -= dArr[c] * DUST_PICK * dt * (dA < cellA ? dA / cellA : 1); }   // pressed pill picks some up
       if (e > 0.02) {
         const wA = dA < cellA ? dA / cellA : 1;   // share of this 1 mm cell the patch covers (no double counting)
         if (ep < f.fpermMax) { cv[c] += (f.kc * Math.max(0, e - f.epsY) + f.ks * e) * dt * wA; ci[c] += (f.cset > 0 ? f.cset : 0) / CSET_T * (e / 0.5) * (e / 0.5) * wearX * dt * wA; }
@@ -1094,8 +1118,9 @@ body.nonotes aside small{display:none}
     B.nc[bi]++; const shr = B.ncp[bi];
     { const lim = 0.5 * meffOf(T, cx, cy, cz) * Math.abs(vn) / dt / shr; if (Fv > lim) Fv = lim; else if (Fv < -lim) Fv = -lim; Fn += Fv; if (Fn < 0) Fn = 0; }
     const epsM = epsAcc / nAct, a = Math.sqrt(a2); sim.stats.meanEps += epsM; sim.stats.contacts++; if (epsM > sim.stats.maxEps) sim.stats.maxEps = epsM;
-    const mu = T.spec.muFoam * f.grip * P.muFoamScale * (1 + f.wrap * epsM);
-    const cap = mu * (Fn + f.adh * PI * a2);
+    const th = thA > 0 ? thA / nAct : 0; if (th > 0) { sim.stats.dustTh = Math.max(sim.stats.dustTh || 0, th); }
+    const mu = T.spec.muFoam * f.grip * P.muFoamScale * (1 + f.wrap * epsM) * (1 - th * (1 - DUST_MU_RATIO));
+    const cap = mu * (Fn + f.adh * (1 - th) * PI * a2);
     // Coulomb friction with real static grip: a tangential spring (Cundall-Strack) per sphere-belt contact stores the
     // shear displacement while the pill sticks to the foam, and is capped at mu*N when it slips. Without it, friction was
     // only a slip-proportional drag and a pill on a moving belt sat still while the belt slid underneath it.
@@ -1156,12 +1181,26 @@ body.nonotes aside small{display:none}
   // resting pill does not lose its grip to numerical micro-bounce. Separation work = pull-off force x ~20 um.
   const ADH_RANGE = 2e-5;
   const DUST_KAPPA = 0.84 / (100 * 9.81 * 0.156);
+  /* Dust film on the foam. Friability fines (~10 um) settle on the belt cells (sim.cells.dust, kg per 1 mm cell). A film
+     of loose powder sits between pill and foam: it lubricates (powder-on-powder friction ~0.35 of rubber grip) and kills
+     the foam's tack, in proportion to the area it covers. Coverage of a cell with dust mass m: theta = 1 - exp(-m / (A *
+     m1 * g)), m1 = mass of one monolayer per area = (2/3) rho d0. Static charge makes the fines agglomerate into clumps
+     instead of spreading as a film, so the same mass covers less area: g = 1 + k_s sqrt(m / (A m1)). k_s grows as the air
+     gets drier (dry desiccated chamber = more static). Pills pressed into the foam pick some of it up (DUST_PICK). */
+  const DUST_D0 = 10e-6, DUST_RHO = 1300, DUST_M1 = 2 / 3 * DUST_RHO * DUST_D0, DUST_MU_RATIO = 0.35, DUST_PICK = 0.5;
+  function dustAgg(sim) { const rh = sim.hum ? sim.hum.rh : 45, st = sim.P.dustStatic == null ? 1 : sim.P.dustStatic; return st * Math.min(1.5, Math.max(0.2, (65 - rh) / 30)); }
+  function dustCover(m, A, ks) { const x = m / (A * DUST_M1); return 1 - Math.exp(-x / (1 + ks * Math.sqrt(x))); }
   function addDust(sim, B, i, E, x, y, z, where, belt, cell) {
     const fri = B.type[i].spec.fri; if (!(fri > 0)) return;
     const dm = fri * DUST_KAPPA * E, st = sim.stats; B.dm[i] += dm; st.dust += dm; st.dustBy[where] += dm;
     if (belt >= 0) sim.cells.dust[belt][cell] += dm;
     const D = sim.dustFx; if (!D) return; D.acc += dm;
-    while (D.acc >= D.per) { D.acc -= D.per; const k = D.head; D.head = (D.head + 1) % D.cap; D.x[k] = x; D.y[k] = y; D.z[k] = z; D.t[k] = sim.t; D.w[k] = where; }
+    while (D.acc >= D.per) { D.acc -= D.per; const k = D.head; D.head = (D.head + 1) % D.cap;
+      // static: a fresh speck is pulled onto a nearby recent one (the clumps then fall and land together)
+      let cx = x, cy = y, cz = z; const ks = dustAgg(sim); D.rs = (D.rs * 1664525 + 1013904223) >>> 0;
+      if (ks > 0 && D.rs / 4294967296 < Math.min(0.9, 0.6 * ks)) { for (let j = 1; j <= 48; j++) { const m = (k - j + D.cap) % D.cap; if (D.t[m] < sim.t - 2) break;
+        const ddx = D.x[m] - x, ddy = D.y[m] - y, ddz = D.z[m] - z; if (ddx * ddx + ddy * ddy + ddz * ddz < 9e-6) { const jj = (D.rs & 1023) / 1023 - 0.5; cx = D.x[m] + jj * 2e-4; cy = D.y[m] - jj * 2e-4; cz = D.z[m]; break; } } }
+      D.x[k] = cx; D.y[k] = cy; D.z[k] = cz; D.t[k] = sim.t; D.w[k] = where; }
   }
   /* ---- Pill-pass sensors + feed controller ------------------------------------------------------------------
      Each sensor is an IR beam of diameter beam_mm across the exit chute, below_mm down the chute (along the incline,
@@ -1195,9 +1234,9 @@ body.nonotes aside small{display:none}
     }
     return false;
   }
-  function newSensor(o) { return Object.assign({ on: true, below_mm: 15, side_mm: 0, axis: 'frontback', beam_mm: 1, half_mm: 15, response_ms: 0.5, min_block_ms: 1, count_on: 'break' }, o || {}, { raw: false, out: false, q: [], blk: false, armed: false, tOn: 0, count: 0, times: [] }); }
+  function newSensor(o) { return Object.assign({ on: true, below_mm: 15, side_mm: 0, axis: 'frontback', beam_mm: 1, half_mm: 15, response_ms: 0.5, min_block_ms: 1, min_clear_ms: 5, count_on: 'break' }, o || {}, { raw: false, offAt: null, out: false, q: [], blk: false, armed: false, tOn: 0, count: 0, times: [] }); }
   function newCtrl(o) {
-    const c = Object.assign({ mode: 'continuous', rpmRun: 12, ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 10, gate_wait_s: 3, wait_gate: true, snap_on_double: true, release_wait_s: 0.5, gate_open_on: 'jit', probe_check: true, stack_tol_pct: 30, min_gap_mm: 0, clear_margin_mm: 3, clear_max_s: 5, clear_retries: 10 }, o || {});
+    const c = Object.assign({ mode: 'continuous', rpmRun: 12, ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 0, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 10, gate_wait_s: 3, wait_gate: true, snap_on_double: true, release_wait_s: 0.5, gate_open_on: 'jit', probe_check: true, stack_tol_pct: 30, min_gap_mm: 0, gate_lead_ms: 30, vib_s1: true, clear_margin_mm: 3, clear_max_s: 5, clear_retries: 10 }, o || {});
     c.sensors = ((o && o.sensors) || [{}]).map(newSensor);
     return Object.assign(c, { snap: false, snapPend: false, snapAt: 0, s2q: [], p1q: [], lastProbe: null, clears: 0, tauThr: [], tauArr: [], s3cur: null, extraAtQ: 0, awaitS3: null, closeAt: null, awaitClear: false, lastPlan: null, lastTb: null, reject: null, rejects: 0, lastWin: null, tRel: -1, held: 0, extra: 0, leaks: 0, exitN: 0, outN: 0, tExit: -1e9, tOut: -1e9, gWant: false, gClr: -1, gMiss: 0, state: 'idle', queue: 0, needs: [], tNext: 0, tStop: 0, cur: null, feeds: [], mRpm: 0, lash: null });
   }
@@ -1255,11 +1294,16 @@ body.nonotes aside small{display:none}
   function s2rec(sim, C, sn) { return { tb: sn.tOn, tc: null, L: null }; }
   // a beam cleared. S2: the pill's length is now known -> schedule the gate to start closing when its top is halfway
   // through. S3: learn the exit timing from this pill, and close the gate if it was waiting for S3.
+  function fallClear(sim, C) {   // time for a pill whose top just left the S2 beam to fall below the gate (from rest: slow bound)
+    const s2 = C.sensors[C.trigger]; if (!s2) return 0;
+    const h = sensorGeom(sim, s2).p[2] - (-2e-3), g = Math.abs(sim.P.gravity ? sim.P.gravity[2] : 9.81) || 9.81;
+    return h > 0 ? Math.sqrt(2 * h / g) + 0.01 : 0;
+  }
   function pillClear(sim, C, k, tb, tc) {
     if (C.mode !== 'feed' || !sim.gate) return;
     const sn = C.sensors[k], zone = sn.zone || 'exit';
     if (k === C.trigger) {
-      const p = exitPlan(sim, C, sn, tb, tc); C.lastPlan = p;
+      const p = exitPlan(sim, C, sn, tb, tc); C.lastPlan = p; C.tS2clr = tc;
       const q = C.s2q.find(r => r.tb === tb); if (q) { q.tc = tc; q.L = p.L; }
       if (C.awaitClear) { C.awaitClear = false; if (p.learned) C.closeAt = p.tThrough + C.gate_close_ms * 1e-3; else C.awaitS3 = C.exitN; }
       return;
@@ -1277,7 +1321,10 @@ body.nonotes aside small{display:none}
         if (thr > 0 && thr < 1.5) { C.tauThr.push(thr); if (C.tauThr.length > 15) C.tauThr.shift(); }
         if (arr > 0 && arr < 1.5) { C.tauArr.push(arr); if (C.tauArr.length > 15) C.tauArr.shift(); }
       }
-      if (C.awaitS3 != null && C.outN >= C.awaitS3) { C.awaitS3 = null; C.closeAt = tc + C.gate_close_ms * 1e-3; }
+      // close once S3 has seen the count -- but never before the pill S2 just sent can have fallen clear of the gate
+      // (free fall from the S2 beam to the gate's underside): if S3's pill was an old one already sitting on the gate,
+      // the closing gate would otherwise slide under the new pill and hold it there, uncounted
+      if (C.awaitS3 != null && C.outN >= C.awaitS3) { C.awaitS3 = null; C.closeAt = Math.max(tc, (C.tS2clr ?? -1e9) + fallClear(sim, C)) + C.gate_close_ms * 1e-3; }
     }
   }
   /* S1 length probe (in the conveyor, up_mm above the bottom idler). Between the drive wheels a gripped pill moves at
@@ -1287,21 +1334,43 @@ body.nonotes aside small{display:none}
      stack_tol_mm) = two pills stacked / touching: reverse the belts until everything in the conveyor is back up in the
      hopper, then feed again; repeat until the length fits (clear_retries, then a jam fault). A following pill closer
      than min_gap_mm behind the last called pill is handled the same way, before either reaches the release point. */
-  function probeEdge(sim, C, k, isBreak, te) {
+  // smallest safe gap behind the last pill of a dose: belt travel while the gate shuts (+ the fall to it) + 1.5 mm margin
+  function autoGap(sim, C) {
+    if (C.min_gap_mm > 0) return C.min_gap_mm * 1e-3;
+    const g = sim.gate, vb = Math.abs(C.rpmRun) * TAU / 60 * sim.P.driveRadius, tClose = g ? (g.travel - (g.a0 || 0)) / (PI / 3) * g.speed : 0.08;
+    return vb * (tClose + 0.05) + 1.5e-3;
+  }
+  /* Conveyor ledger: every pill that S1 sees going down is kept in C.p1q (oldest first) until S2 counts it out, so the
+     controller knows how many pills are staged between S1 and the exit and how far apart they are (belt travel between
+     one pill's tail clearing S1 and the next one's nose breaking it; gripped pills move with the belt). Two checks:
+     - length: one block longer than the pill can be (+ tolerance) = two pills stacked / touching end to end;
+     - gap: the pill right behind the dose's last pill must trail it by at least the gap the gate needs to shut
+       (autoGap). This catches pills sitting nose-to-tail that the beam separates by a sliver of light.
+     Either one = reverse the conveyor back into the hopper and feed again. Also checked when a feed starts, against
+     pills left staged by the previous feed. */
+  function probeEdge(sim, C, k, isBreak, te, Sat) {
     if (C.mode !== 'feed' || !C.probe_check) return;
     const sn = C.sensors[k], sgn = C.rpmRun < 0 ? -1 : 1;
-    if (C.state === 'clearing' || C.state === 'idle' && Math.abs(sim.P.rpm) < 1e-9) return;   // reversing / not moving: ignore
+    if (C.state === 'clearing' || Math.abs(sim.P.rpm) < 1e-9 || sim.P.rpm * sgn < 0) return;   // reversing / not moving: ignore
     if (isBreak) {
       const last = C.p1q[C.p1q.length - 1], gap = last && last.Sc != null ? (sim.S - last.Sc) * sgn : null;
-      const F = C.cur, called = F ? C.p1q.filter(q => q.feed === F && q.ok).length : 0;
-      C.p1q.push({ Sb: sim.S, Sc: null, L: null, ok: false, feed: F, gap });
-      if (F && (C.state === 'feeding') && called >= (F.need || 1) && gap != null && gap * 1e3 < C.min_gap_mm) startClear(sim, C, `next pill only ${fmt1(gap * 1e3)} mm behind the last called pill (min ${C.min_gap_mm} mm)`);
+      C.p1q.push({ Sb: sim.S, Sc: null, L: null, ok: true, feed: C.cur, gap });
+      C.s1Seen = (C.s1Seen || 0) + 1; C.lastGap = gap;
+      if (C.state === 'feeding' || C.state === 'stopping') gapCheck(sim, C);
       return;
     }
     const q = C.p1q[C.p1q.length - 1]; if (!q || q.Sc != null) return;
-    q.Sc = sim.S; q.L = Math.abs(q.Sc - q.Sb) - (sn.beam_mm || 1) * 1e-3;
+    q.Sc = Sat ?? sim.S; q.L = Math.abs(q.Sc - q.Sb) - (sn.beam_mm || 1) * 1e-3;
     const dmax = 2 * sim.pillType.brad, lim = dmax * (1 + C.stack_tol_pct / 100); q.ok = q.L <= lim; C.lastProbe = { L: q.L, dmax, ok: q.ok, t: te };
     if (!q.ok && (C.state === 'feeding' || C.state === 'stopping')) startClear(sim, C, `S1 length ${fmt1(q.L * 1e3)} mm > pill max ${fmt1(dmax * 1e3)} mm + ${C.stack_tol_pct}% → stacked double`);
+  }
+  function gapCheck(sim, C) {
+    const F = C.cur; if (!F || C.state === 'clearing') return false;
+    const rem = Math.max(0, (F.need || 1) - F.n), q = C.p1q[rem];   // first pill that is NOT part of this dose
+    if (rem < 1 || !q || q.gap == null) return false;
+    const gm = autoGap(sim, C);
+    if (q.gap < gm) { startClear(sim, C, `pill only ${fmt1(q.gap * 1e3)} mm behind the dose (needs ≥ ${fmt1(gm * 1e3)} mm) → nose-to-tail double`); return true; }
+    return false;
   }
   function startClear(sim, C, why) {
     const sgn = C.rpmRun < 0 ? -1 : 1, sn = C.sensors.find(x => x.zone === 'probe');
@@ -1334,6 +1403,7 @@ body.nonotes aside small{display:none}
     }
     if (k !== C.trigger) return;
     const tPrev = C.tExit; C.tExit = now;
+    if (C.mode === 'feed' && C.p1q.length) C.p1q.shift();   // ledger: the oldest staged pill has left past S2
     if (sim.gate && C.mode === 'feed') {
       // double feed: the exit sensor sees more pills than were called
       const inAir = C.exitN - C.outN, room = !live || C.state === 'release' ? 0 : F.byOut ? F.need - F.n - inAir : F.need - F.n;
@@ -1363,23 +1433,30 @@ body.nonotes aside small{display:none}
   function ctrlStep(sim, dt) {
     const C = sim.ctrl, P = sim.P, now = sim.t;
     for (let k = 0; k < C.sensors.length; k++) {
-      const sn = C.sensors[k]; if (!sn.on) { sn.raw = sn.out = sn.blk = sn.armed = false; sn.q.length = 0; continue; }
+      const sn = C.sensors[k]; if (!sn.on) { sn.raw = sn.out = sn.blk = sn.armed = false; sn.offAt = null; sn.q.length = 0; continue; }
       const raw = beamBlocked(sim, sn); if (raw !== sn.raw) { sn.raw = raw; sn.q.push(now, raw ? 1 : 0); }
       while (sn.q.length && sn.q[0] + sn.response_ms * 1e-3 <= now + 1e-12) {
         const on = sn.q[1] === 1, te = sn.q[0] + sn.response_ms * 1e-3; sn.q.splice(0, 2); sn.out = on;
+        if (on && sn.offAt != null) { sn.offAt = null; continue; }   // debounce: light for less than min_clear_ms = still the same pill
         if (on && !sn.blk) { sn.blk = true; sn.tOn = te; sn.Son = sim.S; if (k === C.trigger && (C.state === 'feeding' || C.state === 'stopping') && !C.s2Hit) { C.s2Hit = true;
           // just-in-time: the pill is still gripped while it crawls past S2 at belt speed; open so the gate is fully open as
           // its tail leaves the conveyor (length from S1, else the largest pill dimension)
           const g = sim.gate, vb = Math.abs(C.rpmRun) * TAU / 60 * P.driveRadius, q = C.p1q.find(x => x.L != null && x.ok), Lp = q ? q.L : 2 * sim.pillType.brad;
-          const tOpen = g ? (g.travel - (g.a0 || 0)) / (PI / 3) * g.speed : 0; C.s2OpenAt = te + Math.max(0, (vb > 0 ? Lp / vb : 0) - tOpen - 0.02); } if (sn.zone === 'probe') probeEdge(sim, C, k, true, te); }
-        else if (!on && sn.blk) { if (sn.zone === 'probe') probeEdge(sim, C, k, false, te); const wasArmed = sn.armed; if (sn.armed && sn.count_on === 'clear') pillEvent(sim, C, k); sn.blk = false; sn.armed = false; if (wasArmed) pillClear(sim, C, k, sn.tOn, te); }
+          const tOpen = g ? (g.travel - (g.a0 || 0)) / (PI / 3) * g.speed : 0; C.s2OpenAt = te + Math.max(0, (vb > 0 ? Lp / vb : 0) - tOpen - 0.02 - (C.gate_lead_ms || 0) * 1e-3); } if (sn.zone === 'probe') probeEdge(sim, C, k, true, te); }
+        else if (!on && sn.blk && sn.offAt == null) { sn.offAt = te; sn.Soff = sim.S; }
+      }
+      if (sn.offAt != null && now - sn.offAt >= (sn.min_clear_ms ?? 5) * 1e-3 - 1e-12) { const te = sn.offAt; sn.offAt = null;
+        { if (sn.zone === 'probe') probeEdge(sim, C, k, false, te, sn.Soff); const wasArmed = sn.armed; if (sn.armed && sn.count_on === 'clear') pillEvent(sim, C, k); sn.blk = false; sn.armed = false; if (wasArmed) pillClear(sim, C, k, sn.tOn, te); }
       }
       if (sn.blk && !sn.armed && now - sn.tOn >= sn.min_block_ms * 1e-3 - 1e-12) { sn.armed = true; if (sn.count_on !== 'clear') pillEvent(sim, C, k); }
     }
     if (C.mode !== 'feed') return;
     if (C.reject) C.queue = 0;
+    if (C.p1q.length) { const sn1 = C.sensors.find(x => x.zone === 'probe'), lim = Math.min(sim.Lc, ((sn1 && sn1.up_mm) ?? 22) * 1e-3) + 0.02, sg = C.rpmRun < 0 ? -1 : 1;   // ledger: drop pills that must have left long ago (slipped out unseen)
+      while (C.p1q.length && (sim.S - C.p1q[0].Sb) * sg > lim) C.p1q.shift(); }
     if (C.state === 'idle' && C.queue > 0 && now >= C.tNext) { C.queue--; C.state = 'feeding'; C.cur = { t0: now, tLast: now, need: Math.max(1, Math.round(C.needs.length ? C.needs.shift() : (C.pills_per_feed || 1))), n: 0, tDet: -1, tStop: -1, timeout: false, times: [] }; C.feeds.push(C.cur); if (C.feeds.length > 5000) C.feeds.shift();
       C.snap = false; C.snapPend = false; C.closeAt = null; C.awaitClear = false; C.awaitS3 = null; C.s2Hit = false;
+      if (C.probe_check && C.state === 'feeding') gapCheck(sim, C);   // pills left staged by the last feed sitting nose-to-tail
       // pill(s) held on the closed gate: open ONLY the gate and let the Out sensor count them; the belts run only if
       // S3 sees nothing (or too few) within release_wait_s of the gate being fully open, and then run until S3 is satisfied
       if (C.held > 0 && sim.gate) { C.state = 'release'; C.cur.byOut = true; C.cur.release = true; C.cur.fromHeld = C.held; C.held = 0; C.outN = C.exitN; C.tRel = -1; } }
@@ -1444,7 +1521,11 @@ body.nonotes aside small{display:none}
       const dth = C.mRpm * TAU / 60 * dt;
       if ((C.lash >= hb && dth >= 0) || (C.lash <= -hb && dth <= 0)) P.rpm = C.mRpm;   // teeth engaged: belts follow the motor exactly
       else { let l = C.lash + dth, out = 0; if (l > hb) { out = l - hb; l = hb; } else if (l < -hb) { out = l + hb; l = -hb; } C.lash = l; P.rpm = out / dt * 60 / TAU; if (Math.abs(P.rpm) < 1e-9) P.rpm = 0; } }
-    const vt = C.vib_with_motor ? (run ? 1 : 0) : 1, ve = sim.vibEnv == null ? 1 : sim.vibEnv, kv = dt * ((P.vib && P.vib.freq) || 40);   // speaker switched with the motor-enable line; amplitude rises / dies over ~1 cycle
+    let vt = C.vib_with_motor ? (run ? 1 : 0) : 1;
+    // vibrate only until S1 has seen the dose: once the called pill(s) are in the conveyor the shaking stops, so it can't
+    // shake a second pill in behind them (S1 off: vibrator follows the motor as before)
+    if (C.vib_s1 && C.mode === 'feed' && C.sensors.some(x => x.on && x.zone === 'probe')) vt = C.state === 'feeding' && C.cur && C.p1q.length < Math.max(1, (C.cur.need || 1) - C.cur.n) ? 1 : 0;
+    const ve = sim.vibEnv == null ? 1 : sim.vibEnv, kv = dt * ((P.vib && P.vib.freq) || 40);   // speaker switched with the motor-enable line; amplitude rises / dies over ~1 cycle
     sim.vibEnv = ve + Math.max(-kv, Math.min(kv, vt - ve));
   }
   function feedStats(sim) {
@@ -1510,6 +1591,38 @@ body.nonotes aside small{display:none}
     if (!(s <= g.link.wall)) { a = prev; s = gateStroke(g, a); g.stall = true; } else if (a !== prev) g.stall = false;   // servo stalls against the back wall
     const off = s * 1e-3; g.vel = (off - g.off) / dt; g.off = off; g.ang = a; const isOpen = a > (g.a0 || 0) + 1e-4; if (isOpen) sim.stats.gateOpenS = (sim.stats.gateOpenS || 0) + dt;
     if (sim.hum) { const H = sim.hum, tgt = isOpen ? H.amb : H.des, tau = isOpen ? H.tauOpen : H.tauDes; H.rh += (tgt - H.rh) * Math.min(1, dt / Math.max(tau, 1e-3)); }
+  }
+  /* Singulator: an optional rigid knob just above the top of the rollers (a capsule = segment a-b with radius r; len 0
+     = a ball). Same contact law as the walls (stiff penalty spring + damping, Cundall-Strack stick/slip friction with the
+     knob's own coefficient). Its geometry is read every step, so the UI can move / resize it while the sim runs. */
+  function singFrame(sim, o) {
+    if (!o || !o.on) return null;
+    const ax = o.axis || 'v', L = Math.max(0, +o.len_mm || 0) * 1e-3, r = Math.max(0.2, +o.r_mm || 1.5) * 1e-3;
+    const x0 = sim.XB * 0.5 + (+o.x_mm || 0) * 1e-3, u0 = sim.U0 + sim.Lc + (+o.u_mm || 0) * 1e-3, v0 = (+o.v_mm || 0) * 1e-3;
+    const dir = ax === 'x' ? [1, 0, 0] : ax === 'u' ? [0, 1, 0] : [0, 0, 1];   // local (x, u, v)
+    const w = (x, u, v) => [0, 1, 2].map(k => sim.O[k] + x * sim.EX[k] + u * sim.EU[k] + v * sim.EV[k]);
+    // 'v': a peg sticking out of the back plate (v = v0 .. v0+len); 'x' / 'u': a bar centred on (x0, u0, v0)
+    const a = ax === 'v' ? w(x0, u0, v0) : w(x0 - dir[0] * L / 2, u0 - dir[1] * L / 2, v0 + r);
+    const b = ax === 'v' ? w(x0, u0, v0 + L) : w(x0 + dir[0] * L / 2, u0 + dir[1] * L / 2, v0 + r);
+    return { a, b, r, mu: Math.max(0, o.mu == null ? 0.3 : +o.mu), hits: 0, Fpk: 0 };
+  }
+  function singContact(sim, B, i, k, X, Y, Z, rs, dt) {
+    const K = sim.sing, a = K.a, b = K.b, abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2], L2 = abx * abx + aby * aby + abz * abz;
+    let t = L2 > 0 ? ((X - a[0]) * abx + (Y - a[1]) * aby + (Z - a[2]) * abz) / L2 : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = a[0] + t * abx, qy = a[1] + t * aby, qz = a[2] + t * abz, dx = X - qx, dy = Y - qy, dz = Z - qz, d2 = dx * dx + dy * dy + dz * dz, R = rs + K.r;
+    if (d2 >= R * R || d2 < 1e-18) return;
+    const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, nz = dz / d, pen = R - d, T = B.type[i];
+    const rx = -nx * rs + (X - B.px[i]), ry = -ny * rs + (Y - B.py[i]), rz = -nz * rs + (Z - B.pz[i]);
+    const cvx = B.vx[i] + B.wy[i] * rz - B.wz[i] * ry, cvy = B.vy[i] + B.wz[i] * rx - B.wx[i] * rz, cvz = B.vz[i] + B.wx[i] * ry - B.wy[i] * rx;
+    const vn = cvx * nx + cvy * ny + cvz * nz, kW = sim.P.contactFreq * sim.P.contactFreq * T.mass, cc = 2 * zetaOf(T.spec.rest) * Math.sqrt(kW * T.mass);
+    B.nc[i]++; let Fd = -cc * vn; { const lim = 0.5 * meffOf(T, rx, ry, rz) * Math.abs(vn) / dt / B.ncp[i]; if (Fd > lim) Fd = lim; else if (Fd < -lim) Fd = -lim; }
+    let Fn = kW * pen + Fd; if (Fn < 0) Fn = 0;
+    const key = i * 64 + _si[k], fresh = B.xiKS[key] !== sim.steps; B.xiKS[key] = sim.steps + 1;
+    tangSpring(B.xiK, key * 3, fresh, nx, ny, nz, cvx - vn * nx, cvy - vn * ny, cvz - vn * nz, T.mass / (1 + T.mass * (rx * rx + ry * ry + rz * rz) / T.Imin) / B.ncp[i], K.mu * Fn, dt);
+    const Fx = Fn * nx + _ft[0], Fy = Fn * ny + _ft[1], Fz = Fn * nz + _ft[2];
+    B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz; B.lS[i] += Fn; B.lX[i] += Fn * nx; B.lY[i] += Fn * ny; B.lZ[i] += Fn * nz;
+    B.tx[i] += ry * Fz - rz * Fy; B.ty[i] += rz * Fx - rx * Fz; B.tz[i] += rx * Fy - ry * Fx;
+    K.hits++; if (Fn > K.Fpk) K.Fpk = Fn;
   }
   function tangSpring(xi, o, fresh, nx, ny, nz, vtx, vty, vtz, mt, cap, dt) {
     let ex = fresh ? 0 : xi[o], ey = fresh ? 0 : xi[o + 1], ez = fresh ? 0 : xi[o + 2];
@@ -1674,6 +1787,7 @@ body.nonotes aside small{display:none}
           B.fx[i] += ax; B.fy[i] += ay; B.fz[i] += az; B.tx[i] += ary * az - arz * ay; B.ty[i] += arz * ax - arx * az; B.tz[i] += arx * ay - ary * ax;
         }
       }
+      if (sim.sing) singContact(sim, B, i, k, X, Y, Z, rs, dt);
       if (!sim.noFoam) { foamContact(sim, B, i, X, Y, Z, rs, 0, dt, _si[k]); foamContact(sim, B, i, X, Y, Z, rs, 1, dt, _si[k]); }
     }
     const rotv = [0, 0, 0], wb = [0, 0, 0], tb = [0, 0, 0];
@@ -1724,7 +1838,7 @@ body.nonotes aside small{display:none}
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, gelTackFactor, gateStroke, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, beltPoint, newCtrl, newSensor, sensorGeom, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, gelTackFactor, gateStroke, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, beltPoint, newCtrl, newSensor, sensorGeom, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -1736,10 +1850,10 @@ body.nonotes aside small{display:none}
 
   /* ---------------------------------------------------------------- state / params */
   const S = {
-    foamName: 'PU open-cell', shore: 50, thick: 4.0, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
+    foamName: 'Silicone sponge', shore: 40, thick: 4.5, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
-    count: 40, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, shellAlpha: 0.12, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
-    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, crushN: null, loadCol: false, dustShow: true, ctrl: null,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
+    count: 10, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, shellAlpha: 0.12, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
+    geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, crushN: null, loadCol: false, dustShow: true, dustTack: true, dustStatic: 1, sing: { on: false, axis: 'v', u_mm: 11, x_mm: 0, v_mm: 0, len_mm: 3, r_mm: 1.5, mu: 0.3 }, ctrl: null,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
   };
   let sim = null, pending = null;
 
@@ -1755,7 +1869,7 @@ body.nonotes aside small{display:none}
   function applyParams() {
     if (!sim) return;
     if (typeof TEX !== 'undefined' && sim.cells) applyTex();
-    applyVib(); applyTire(); applyHum();
+    applyVib(); applyTire(); applyHum(); applySing(); sim.P.dustTack = S.dustTack ? 1 : 0; sim.P.dustStatic = S.dustStatic;
     if (S.ctrl && S.ctrl.mode === 'feed' && sim.ctrl) sim.ctrl.rpmRun = S.rpm; else sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1;
     applyCtrl();
   }
@@ -2006,6 +2120,7 @@ body.nonotes aside small{display:none}
     for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue; const M = m4.fromQP([B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3]], [B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3]);
       let c = hsv(B.hue[i]); if (S.loadCol) { const f = Math.min(1, (B.sq[i] || 0) / crushLimit()), w = Math.min(1, Math.sqrt(f)); c = [c[0] + (1 - c[0]) * w, c[1] * (1 - w), c[2] * (1 - w)]; }
       draw(pillMesh, M, c, 1, false, true); }
+    if (singGL && sim.sing) draw(singGL, I, [0.95, 0.45, 0.85], 1, false);
     // dust specks: each falls straight down at a settling speed (~15 mm/s) from where it was shed, lands on the first
     // surface below (wall, plate, hopper, glass or belt -- FFx.dustLand) and sticks; specks on a belt ride with it
     if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx, now = sim.t, vs = 15e-3; let n = 0;
@@ -2025,10 +2140,16 @@ body.nonotes aside small{display:none}
 
     // sensor beams: red lines across the chute, bright while blocked
     if (sim.ctrl) { const lines = []; for (const sn of sim.ctrl.sensors) { if (!sn.on) continue; const g = FFx.sensorGeom(sim, sn); lines.push([g, sn.out]); }
-      if (lines.length) { if (!beamGL) { beamGL = { vao: gl.createVertexArray(), pb: gl.createBuffer() }; gl.bindVertexArray(beamGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, beamGL.pb); gl.bufferData(gl.ARRAY_BUFFER, 6 * 4, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
+      if (lines.length) { if (!beamGL) { beamGL = { vao: gl.createVertexArray(), pb: gl.createBuffer() }; gl.bindVertexArray(beamGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, beamGL.pb); gl.bufferData(gl.ARRAY_BUFFER, 64 * 3 * 4, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
         gl.bindVertexArray(beamGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, beamGL.pb); gl.uniformMatrix4fv(U.uM, false, I); gl.uniform1i(U.uUseCol, 0); gl.uniform1i(U.uPat, 0); gl.uniform1i(U.uFlat, 0); gl.uniform1f(U.uAlpha, 1); gl.vertexAttrib3f(A.nrm, 0, 0, 1);
-        for (const [g, on] of lines) { const h = g.half * 1e3, p = g.p.map(x => x * 1e3); gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array([p[0] - g.d[0] * h, p[1] - g.d[1] * h, p[2] - g.d[2] * h, p[0] + g.d[0] * h, p[1] + g.d[1] * h, p[2] + g.d[2] * h]));
-          gl.uniform3fv(U.uCol, on ? [1, 0.15, 0.1] : [0.55, 0.08, 0.06]); gl.drawArrays(gl.LINES, 0, 2); gl.drawArrays(gl.POINTS, 0, 2); }
+        // drawn on top of everything (no depth test) as a dotted bar of 3-px points, so a beam inside the belts / shell still
+        // shows and moves visibly when its position slider changes; bright when blocked
+        gl.disable(gl.DEPTH_TEST); const NP = 61, buf = new Float32Array(NP * 3);
+        for (const [g, on] of lines) { const h = g.half * 1e3, p = g.p.map(x => x * 1e3);
+          for (let j = 0; j < NP; j++) { const t = -h + 2 * h * j / (NP - 1); buf[j * 3] = p[0] + g.d[0] * t; buf[j * 3 + 1] = p[1] + g.d[1] * t; buf[j * 3 + 2] = p[2] + g.d[2] * t; }
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, buf);
+          gl.uniform3fv(U.uCol, on ? [1, 0.95, 0.2] : [1, 0.12, 0.08]); gl.drawArrays(gl.LINE_STRIP, 0, NP); gl.drawArrays(gl.POINTS, 0, NP); }
+        gl.enable(gl.DEPTH_TEST);
         gl.bindVertexArray(null); } }
     // hopper translucent
     if (S.hopperAlpha > 0.01) { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'hopper') draw(p.mesh, I, ROLECOL.hopper, S.hopperAlpha, true); else if (p.role === 'throat') draw(p.mesh, I, [0.98, 0.72, 0.35], Math.min(1, S.hopperAlpha * 1.8 + 0.12), true); gl.depthMask(true); }
@@ -2099,6 +2220,8 @@ body.nonotes aside small{display:none}
       let wi = -1, wf = 0; for (let i = 0; i < B.n; i++) { const f = B.dm[i] / B.type[i].mass; if (f > wf) { wf = f; wi = i; } }
       $('r_dust').textContent = !(fri > 0) && !st.dust ? 'none (this pill does not powder)' : `${m(st.dust)} total · ${m(st.dust / Math.max(sim.t, 1e-6) * 60)}/min`;
       $('r_dustPP').textContent = st.dispensed ? m(st.dust / st.dispensed) : '—';
+      { const K = sim.sing; $('r_sing').textContent = K ? `${K.hits ? 'pill touching it' : 'no contact'} · peak push ${fmt(K.Fpk, 2)} N` : 'off'; if (K) K.hits = 0; }
+      { const th = st.dustTh || 0; st.dustTh = 0; $('r_dustTh').textContent = sim.P.dustTack > 0 ? (th > 0 ? `${fmt(th * 100, th < 0.01 ? 3 : 1)}% of the contact covered → grip −${fmt(th * 65, th < 0.01 ? 3 : 1)}%, tack −${fmt(th * 100, th < 0.01 ? 3 : 1)}%` : 'clean') : 'ignored'; }
       $('r_dustW').textContent = st.dust > 0 ? `belts ${fmt(st.dustBy[0] / st.dust * 100, 0)}% · pile ${fmt(st.dustBy[1] / st.dust * 100, 0)}% · walls ${fmt(st.dustBy[2] / st.dust * 100, 0)}%` : '—';
       $('r_dustPk').textContent = wi >= 0 ? `pill #${B.id[wi]} lost ${fmt(wf * 100, wf < 1e-4 ? 4 : 3)}% of its mass` : '—'; }
     { const B = sim.bodies, W = sim.pillType.spec.tack || 0; let nc = 0, mx = 0, mi = -1;
@@ -2154,6 +2277,7 @@ body.nonotes aside small{display:none}
   $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
 
   function syncUI() {
+    singUI();
     if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
     S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; syncCtrlUI(); $('shellA').value = S.shellAlpha ?? 0.12; $('hopA').value = S.hopperAlpha; if (sim) $('crushN').value = S.crushN > 0 ? S.crushN : defaultCrush(sim.pillType.spec); $('loadCol').checked = !!S.loadCol; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
@@ -2194,8 +2318,8 @@ body.nonotes aside small{display:none}
   $('geoReset').onclick = () => { S.geom = { bot: 0, top: 0, W: 8 }; syncUI(); applyGeom(); };
 
   /* ---- sensors + feed control (engine: newCtrl / ctrlStep) */
-  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 1, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 10, gate_wait_s: 3, wait_gate: true, snap_on_double: true, release_wait_s: 0.5, gate_open_on: 'jit', probe_check: true, stack_tol_pct: 30, min_gap_mm: 0, clear_max_s: 5, clear_retries: 10, gate_stroke_mm: 17, gate_speed: 0.10, n: 1, sel: 1,
-    sensors: [{ on: true, zone: 'probe', up_mm: 22 }, { on: true, zone: 'exit', below_mm: 0, count_on: 'clear' }, { on: true, zone: 'gate', pos_mm: 4 }].map(o => Object.assign({ side_mm: 0, axis: 'frontback', beam_mm: 1, response_ms: 0.5, min_block_ms: 1, count_on: 'break' }, o)) }; }
+  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 1, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 10, gate_wait_s: 3, wait_gate: true, snap_on_double: true, release_wait_s: 0.5, gate_open_on: 'jit', probe_check: true, stack_tol_pct: 30, min_gap_mm: 0, gate_lead_ms: 30, vib_s1: true, clear_max_s: 5, clear_retries: 10, gate_stroke_mm: 17, gate_speed: 0.10, n: 1, sel: 1,
+    sensors: [{ on: true, zone: 'probe', up_mm: 22 }, { on: true, zone: 'exit', below_mm: 0, count_on: 'clear' }, { on: true, zone: 'gate', pos_mm: 4 }].map(o => Object.assign({ side_mm: 0, axis: 'frontback', beam_mm: 1, response_ms: 0.5, min_block_ms: 1, min_clear_ms: 5, count_on: 'break' }, o)) }; }
   function ctS() { if (!S.ctrl || !Array.isArray(S.ctrl.sensors)) S.ctrl = CT_DEF(); if (S.ctrl.sensors.length && !S.ctrl.sensors[0].zone) { const o = S.ctrl.sensors[0]; S.ctrl.sensors = []; S.ctrl.trigger = 1; S.ctrl.sel = 1; S.ctrl._old = o; } const d = CT_DEF(); for (const k in d) if (S.ctrl[k] == null) S.ctrl[k] = d[k]; S.ctrl.sensors = d.sensors.map((x, i) => Object.assign(x, S.ctrl.sensors[i] || {})); if (S.ctrl._old) { for (const k of ['below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'count_on']) if (S.ctrl._old[k] != null) S.ctrl.sensors[1][k] = S.ctrl._old[k]; delete S.ctrl._old; }
     if (S.ctrl.sensors[0] && S.ctrl.sensors[0].zone === 'entry') { S.ctrl.sensors[0].zone = 'probe'; S.ctrl.sensors[0].up_mm = 22; delete S.ctrl.sensors[0].pos_mm; }   // S1 is now the in-conveyor length probe
     return S.ctrl; }
@@ -2203,17 +2327,17 @@ body.nonotes aside small{display:none}
     if (!sim) return; const c = ctS();
     if (!sim.ctrl) { sim.ctrl = FFx.newCtrl({ trigger: c.trigger, sensors: c.sensors.map(x => Object.assign({}, x)) }); }
     const C = sim.ctrl, was = C.mode;
-    for (const k of ['ramp_ms', 'stop_delay_ms', 'timeout_s', 'gap_ms', 'vib_with_motor', 'trigger', 'backup', 'backup_mm', 'backup_mm_s', 'backlash_deg', 'gate_close_ms', 'gate_wait_s', 'wait_gate', 'snap_on_double', 'release_wait_s', 'gate_open_on', 'probe_check', 'stack_tol_pct', 'min_gap_mm', 'clear_max_s', 'clear_retries']) C[k] = c[k];
+    for (const k of ['ramp_ms', 'stop_delay_ms', 'timeout_s', 'gap_ms', 'vib_with_motor', 'trigger', 'backup', 'backup_mm', 'backup_mm_s', 'backlash_deg', 'gate_close_ms', 'gate_wait_s', 'wait_gate', 'snap_on_double', 'release_wait_s', 'gate_open_on', 'probe_check', 'stack_tol_pct', 'min_gap_mm', 'gate_lead_ms', 'vib_s1', 'clear_max_s', 'clear_retries']) if (c[k] !== undefined) C[k] = c[k];
     if (sim.gate) { const g = sim.gate, st = c.gate_stroke_mm ?? 17; g.strokeMM = st; g.travel = FFx.gateTravelFor(g, (g.base || 0) + st); sim.gate.speed = c.gate_speed; }
-    c.sensors.forEach((x, i) => { for (const k of ['on', 'zone', 'pos_mm', 'below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'count_on']) C.sensors[i][k] = x[k]; });
+    c.sensors.forEach((x, i) => { for (const k of ['on', 'zone', 'pos_mm', 'up_mm', 'below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'min_clear_ms', 'count_on']) if (x[k] !== undefined) C.sensors[i][k] = x[k]; });
     C.mode = c.mode; C.rpmRun = S.rpm;
     if (c.mode === 'feed' && was !== 'feed') { C.gWant = false; C.outN = C.exitN; C.held = 0; C.snap = false; C.snapPend = false; C.s2q.length = 0; C.p1q.length = 0; C.closeAt = null; C.awaitClear = false; C.awaitS3 = null; C.state = 'idle'; C.queue = 0; sim.P.rpm = 0; C.mRpm = 0; C.lash = null; sim.vibEnv = 0; }
     if (c.mode !== 'feed') { C.state = 'idle'; C.queue = 0; sim.P.rpm = S.rpm; sim.vibEnv = null; }
   }
   function syncCtrlUI() {
     const c = ctS(), sn = c.sensors[c.sel];
-    $('ctMode').value = c.mode; $('ctN').value = c.n; $('btnFeed').textContent = `▶ Dispense ${c.n} pill${c.n === 1 ? '' : 's'}`; $('ctVib').checked = !!c.vib_with_motor; $('snSel').value = c.sel;
-    $('ctBack').checked = !!c.backup; $('gtWaitOpen').checked = c.wait_gate !== false; $('gtOpenOn').value = c.gate_open_on || 'jit'; $('pbOn').checked = c.probe_check !== false; for (const [id, v] of [['pbTol', c.stack_tol_pct ?? 30], ['pbGap', c.min_gap_mm ?? 0], ['pbTries', c.clear_retries ?? 10]]) { $(id).value = v; $(id + 'V').textContent = v; } $('gtSnap').checked = c.snap_on_double !== false; for (const [id, v] of [['gtRel', c.release_wait_s ?? 0.5], ['gtClose', c.gate_close_ms], ['gtWait', c.gate_wait_s], ['gtTrav', c.gate_stroke_mm ?? 17], ['gtSpd', c.gate_speed], ['ctBackMm', c.backup_mm], ['ctBackV', c.backup_mm_s], ['ctLash', c.backlash_deg], ['ctDelay', c.stop_delay_ms], ['ctRamp', c.ramp_ms], ['ctTimeout', c.timeout_s], ['ctGap', c.gap_ms], ['snSide', sn.side_mm], ['snBeam', sn.beam_mm], ['snResp', sn.response_ms], ['snMin', sn.min_block_ms]]) { $(id).value = v; $(id + 'V').textContent = v; }
+    $('ctMode').value = c.mode; $('ctN').value = c.n; $('btnFeed').textContent = `▶ Dispense ${c.n} pill${c.n === 1 ? '' : 's'}`; $('ctVib').checked = !!c.vib_with_motor; $('ctVibS1').checked = c.vib_s1 !== false; $('snSel').value = c.sel;
+    $('ctBack').checked = !!c.backup; $('gtWaitOpen').checked = c.wait_gate !== false; $('gtOpenOn').value = c.gate_open_on || 'jit'; $('pbOn').checked = c.probe_check !== false; for (const [id, v] of [['pbTol', c.stack_tol_pct ?? 30], ['pbGap', c.min_gap_mm ?? 0], ['pbTries', c.clear_retries ?? 10], ['gtLead', c.gate_lead_ms ?? 30]]) { $(id).value = v; $(id + 'V').textContent = v; } $('gtSnap').checked = c.snap_on_double !== false; for (const [id, v] of [['gtRel', c.release_wait_s ?? 0.5], ['gtClose', c.gate_close_ms], ['gtWait', c.gate_wait_s], ['gtTrav', c.gate_stroke_mm ?? 17], ['gtSpd', c.gate_speed], ['ctBackMm', c.backup_mm], ['ctBackV', c.backup_mm_s], ['ctLash', c.backlash_deg], ['ctDelay', c.stop_delay_ms], ['ctRamp', c.ramp_ms], ['ctTimeout', c.timeout_s], ['ctGap', c.gap_ms], ['snSide', sn.side_mm], ['snBeam', sn.beam_mm], ['snResp', sn.response_ms], ['snMin', sn.min_block_ms], ['snClr', sn.min_clear_ms ?? 5]]) { $(id).value = v; $(id + 'V').textContent = v; }
     { const z = sn.zone || 'exit', e = $('snBelow'), R = z === 'probe' ? [2, +(sim.Lc * 1e3).toFixed(1), 0.5] : z === 'entry' ? [-10, 20, 0.5] : z === 'gate' ? [1, 7, 0.5] : [0, 40, 0.5], v = z === 'exit' ? sn.below_mm : z === 'probe' ? (sn.up_mm ?? 22) : (sn.pos_mm ?? (z === 'gate' ? 4 : 0));
       e.min = R[0]; e.max = R[1]; e.step = R[2]; e.value = v; $('snBelowV').textContent = v; $('snBelowL').textContent = z === 'probe' ? 'Position (up from bottom idler)' : z === 'entry' ? 'Position (above top idler)' : z === 'gate' ? 'Position (below gate)' : 'Position (down chute)'; }
     $('snOn').checked = !!sn.on; $('snTrig').checked = c.trigger === c.sel; $('snAxis').value = sn.axis; $('snEdge').value = sn.count_on;
@@ -2221,7 +2345,8 @@ body.nonotes aside small{display:none}
     backUI();
   }
   $('pbOn').onchange = () => { ctS().probe_check = $('pbOn').checked; applyCtrl(); };
-  for (const [id, k] of [['pbTol', 'stack_tol_pct'], ['pbGap', 'min_gap_mm'], ['pbTries', 'clear_retries']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
+  for (const [id, k] of [['pbTol', 'stack_tol_pct'], ['pbGap', 'min_gap_mm'], ['pbTries', 'clear_retries'], ['gtLead', 'gate_lead_ms']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
+  $('ctVibS1').onchange = () => { ctS().vib_s1 = $('ctVibS1').checked; applyCtrl(); };
   $('gtOpenOn').onchange = () => { ctS().gate_open_on = $('gtOpenOn').value; applyCtrl(); };
   $('gtWaitOpen').onchange = () => { ctS().wait_gate = $('gtWaitOpen').checked; applyCtrl(); };
   $('gtSnap').onchange = () => { ctS().snap_on_double = $('gtSnap').checked; applyCtrl(); };
@@ -2229,7 +2354,7 @@ body.nonotes aside small{display:none}
   $('ctBack').onchange = () => { ctS().backup = $('ctBack').checked; applyCtrl(); };
   for (const [id, k] of [['ctBackMm', 'backup_mm'], ['ctBackV', 'backup_mm_s'], ['ctLash', 'backlash_deg'], ['ctDelay', 'stop_delay_ms'], ['ctRamp', 'ramp_ms'], ['ctTimeout', 'timeout_s'], ['ctGap', 'gap_ms']]) hook(id, v => { ctS()[k] = +v; applyCtrl(); });
   hook('snBelow', v => { const c = ctS(), x = c.sensors[c.sel], z = x.zone || 'exit'; x[z === 'exit' ? 'below_mm' : z === 'probe' ? 'up_mm' : 'pos_mm'] = +v; applyCtrl(); });
-  for (const [id, k] of [['snSide', 'side_mm'], ['snBeam', 'beam_mm'], ['snResp', 'response_ms'], ['snMin', 'min_block_ms']]) hook(id, v => { const c = ctS(); c.sensors[c.sel][k] = +v; applyCtrl(); });
+  for (const [id, k] of [['snSide', 'side_mm'], ['snBeam', 'beam_mm'], ['snResp', 'response_ms'], ['snMin', 'min_block_ms'], ['snClr', 'min_clear_ms']]) hook(id, v => { const c = ctS(); c.sensors[c.sel][k] = +v; applyCtrl(); });
   $('snAxis').onchange = () => { const c = ctS(); c.sensors[c.sel].axis = $('snAxis').value; applyCtrl(); };
   $('snEdge').onchange = () => { const c = ctS(); c.sensors[c.sel].count_on = $('snEdge').value; applyCtrl(); };
   $('snOn').onchange = () => { const c = ctS(); c.sensors[c.sel].on = $('snOn').checked; applyCtrl(); };
@@ -2253,6 +2378,7 @@ body.nonotes aside small{display:none}
     humReadouts();
     const C = sim.ctrl; if (!C) return; const P = sim.P;
     { const p = C.lastProbe; $('r_probe').textContent = p ? `${fmt(p.L * 1e3, 1)} mm (pill max ${fmt(p.dmax * 1e3, 1)}) → ${p.ok ? 'single' : C.state === 'clearing' ? 'STACKED — reversing into hopper' : 'STACKED → reversed into hopper, retried'}` + (C.clears ? ` · ${C.clears} reverse-clear${C.clears > 1 ? 's' : ''}` : '') : (C.clears ? `${C.clears} reverse-clears` : '—'); $('r_probe').style.color = p && !p.ok ? '#fc6' : ''; }
+    { const gm = FFx.autoGap ? FFx.autoGap(sim, C) : null; $('r_gap').textContent = (C.lastGap != null ? `${fmt(C.lastGap * 1e3, 1)} mm last` : '—') + (gm != null ? ` · needs ≥ ${fmt(gm * 1e3, 1)} mm` : '') + ` · ${C.p1q.length} staged`; }
     $('rejBox').style.display = C.reject ? '' : 'none'; if (C.reject) $('rejBox').querySelector('b').textContent = C.reject.kind === 'JAM' ? '⛔ JAM — could not singulate, operator needed' : '⛔ LOT REJECTED — signal sent to host'; if (C.reject) $('rejWhy').textContent = `at ${fmt(C.reject.t, 2)} s: ${C.reject.why}. Dispensing is locked.`;
     $('btnFeed').disabled = !!C.reject;
     if (sim.gate) { const w = C.lastWin, p = C.lastPlan, need = FFx.gateBlockTimeOpen(sim), n = C.tauThr.length;
@@ -2644,6 +2770,27 @@ body.nonotes aside small{display:none}
   }
   const CAMNAMES = { 3: 'Triangle', 4: 'Square', 5: 'Pentagon', 6: 'Hexagon', 7: 'Heptagon', 8: 'Octagon' };
   function shoreAtoE(S) { return S > 0 ? 0.0981e6 * (56 + 7.62336 * S) / (0.137505 * (254 - 2.54 * S)) : 0; }   // Gent's relation, Pa
+  // singulator knob: physics reads sim.sing every step, so moving a slider takes effect immediately; the mesh is rebuilt here
+  let singGL = null;
+  function capsuleMesh(a, b, r) {
+    const P = [], N = [], I = [], ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...ab), ax = L > 1e-9 ? ab.map(x => x / L) : [0, 0, 1];
+    const t0 = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], e1 = [ax[1] * t0[2] - ax[2] * t0[1], ax[2] * t0[0] - ax[0] * t0[2], ax[0] * t0[1] - ax[1] * t0[0]], l1 = Math.hypot(...e1); for (let k = 0; k < 3; k++) e1[k] /= l1;
+    const e2 = [ax[1] * e1[2] - ax[2] * e1[1], ax[2] * e1[0] - ax[0] * e1[2], ax[0] * e1[1] - ax[1] * e1[0]], nl = 16, ns = 24;
+    for (let i = 0; i <= nl; i++) { const ph = -PI / 2 + PI * i / nl, cz = Math.sin(ph), cr = Math.cos(ph), base = i <= nl / 2 ? a : b;
+      for (let j = 0; j <= ns; j++) { const th = TAU * j / ns, n = [0, 1, 2].map(k => cr * (Math.cos(th) * e1[k] + Math.sin(th) * e2[k]) + cz * ax[k]); N.push(...n); P.push(...[0, 1, 2].map(k => base[k] + r * n[k])); } }
+    for (let i = 0; i < nl; i++) for (let j = 0; j < ns; j++) { const p = i * (ns + 1) + j, q = p + ns + 1; I.push(p, q, p + 1, p + 1, q, q + 1); }
+    return mkMesh(new Float32Array(P), new Uint16Array(I), new Float32Array(N), null, false);
+  }
+  function applySing() {
+    if (!sim) return; const K = sim.setSingulator(S.sing && S.sing.on ? S.sing : null);
+    singGL = K ? capsuleMesh(K.a.map(x => x * 1e3), K.b.map(x => x * 1e3), K.r * 1e3) : null;
+  }
+  for (const [id, k] of [['sgU', 'u_mm'], ['sgX', 'x_mm'], ['sgV', 'v_mm'], ['sgLen', 'len_mm'], ['sgR', 'r_mm'], ['sgMu', 'mu']]) hook(id, v => { S.sing[k] = +v; applySing(); });
+  $('sgOn').onchange = () => { S.sing.on = $('sgOn').checked; applySing(); };
+  $('sgAxis').onchange = () => { S.sing.axis = $('sgAxis').value; applySing(); };
+  $('dustTack').onchange = () => { S.dustTack = $('dustTack').checked; if (sim) sim.P.dustTack = S.dustTack ? 1 : 0; };
+  hook('dustStatic', v => { S.dustStatic = +v; if (sim) sim.P.dustStatic = S.dustStatic; });
+  function singUI() { const g = S.sing; $('sgOn').checked = !!g.on; $('sgAxis').value = g.axis; for (const [id, k] of [['sgU', 'u_mm'], ['sgX', 'x_mm'], ['sgV', 'v_mm'], ['sgLen', 'len_mm'], ['sgR', 'r_mm'], ['sgMu', 'mu']]) { $(id).value = g[k]; $(id + 'V').textContent = g[k]; } $('dustTack').checked = !!S.dustTack; $('dustStatic').value = S.dustStatic; $('dustStaticV').textContent = S.dustStatic; }
   function applyTire() { const sa = +$('tireMat').value, t = +$('tireT').value; S.tireA = sa; S.tireT = t; if (sim) { sim.P.tireE = shoreAtoE(sa); sim.P.tireT = t * 1e-3; } }
   function humAvg() { const h = sim && sim.hum; if (!h) return null; const d0 = sim.stats.delivered ? (sim.stats.gateOpenS || 0) / sim.stats.delivered : 0.25;
     const d = Math.min(1, +$('hmDoses').value * d0 / 86400), a = d / h.tauOpen, b = (1 - d) / h.tauDes; return { rh: (a * h.amb + b * h.des) / (a + b), perDose: d0, measured: !!sim.stats.delivered }; }
@@ -2658,7 +2805,7 @@ body.nonotes aside small{display:none}
     $('r_hmTack').textContent = (M && M.gel ? `×${fmt(f, f < 10 ? 2 : 0)} (pill RH ${fmt(rh, 0)} %)` : `no effect on ${M ? M.label.toLowerCase() : 'this pill'}`) + (rh > 75 ? ' — shells fuse, expect stuck pairs (S1 reads ~2× → reverse cannot separate them → JAM)' : rh > 65 ? ' — above the 65 % storage limit: shells soften and stick' : rh < 35 ? ' — below 35 %: gelatin goes brittle, builds static' : ' — inside the 35–65 % storage window');
     $('r_hmTack').style.color = rh > 65 || rh < 35 ? '#fc6' : ''; }
   $('tireMat').onchange = applyTire; $('tireT').oninput = () => { $('tireTV').textContent = $('tireT').value; applyTire(); };
-  $('camShape').onchange = () => { if ($('camShape').value === 'round') { applyCamProfile(new Array(72).fill(7.0), 'Round drive wheel (r 7.0 mm, constant 1 mm nip — no lobes)'); return; } const N = +$('camShape').value; if (!N) return; applyCamProfile(polygonCam(N, 1.0), `${CAMNAMES[N]} cam preset`); };
+  $('camShape').onchange = () => { if ($('camShape').value === 'round') { applyCamProfile(new Array(72).fill(7.0), 'Round drive wheel (r 7.0 mm, no lobes)'); return; } const N = +$('camShape').value; if (!N) return; applyCamProfile(polygonCam(N, 1.0), `${CAMNAMES[N]} cam preset`); };
 
   /* ================================================================ vibration */
   function vibAxis(a) { return a === 'vert' ? [0, 0, 1] : a === 'across' ? EX.slice() : a === 'incline' ? EU.slice() : EV.slice(); }
@@ -2678,6 +2825,7 @@ body.nonotes aside small{display:none}
   window.__FF = { get sim() { return sim; }, S, cam, setPreset, frame, step: n => sim.step(n), render };
 
   newSim(); syncUI(); applyFoam(); applyParams(); applyTex();
+  $('camShape').value = 'round'; applyCamProfile(new Array(72).fill(7.0), 'Round drive wheel (r 7.0 mm, no lobes) — default');   // default drive: round wheel
   (function hashCmd() { // #run=SECONDS&cam=preset&pause=1&sec=1&rpm=..  (used for headless screenshots / tests)
     const h = new URLSearchParams(location.hash.slice(1)); if (!h.size) return;
     for (const [k, v] of h) { if (k === 'rpm') { S.rpm = +v; } if (k === 'thick') S.thick = +v; if (k === 'shore') S.shore = +v; if (k === 'foam') S.foamName = v; if (k === 'shape') S.pill.shape = v; if (k === 'W') S.pill.W = +v; if (k === 'T') S.pill.T = +v; if (k === 'L') S.pill.L = +v; if (k === 'count') S.count = +v; if (k === 'muF') S.pill.muFoam = +v; }
@@ -2701,7 +2849,7 @@ body.nonotes aside small{display:none}
   let st = {}; try { st = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} };
   const toast = $('ffToast'); if (toast) document.body.appendChild(toast);
-  const ORDER = { L: ['Pills', 'Drive', 'Sensors & feed control', 'Vibration (speaker)', 'Foam belts', 'Belt layout', 'Hopper throat', 'Belt texture', 'Geometry'],
+  const ORDER = { L: ['Pills', 'Drive', 'Singulator (bump at the entry)', 'Sensors & feed control', 'Vibration (speaker)', 'Foam belts', 'Belt layout', 'Hopper throat', 'Belt texture', 'Geometry'],
                   R: ['Dispensing', 'Pill loads', 'Dust', 'Tack', 'Belts', 'View', 'Simulation', 'Trial runner'] };
   const OPEN = new Set(['Pills', 'Drive', 'Sensors & feed control', 'Dispensing', 'Pill loads']);
   const txt = id => { const e = $(id); return e ? (e.tagName === 'SELECT' ? (e.options[e.selectedIndex] || {}).text || '' : e.value != null && e.tagName === 'INPUT' ? e.value : e.textContent).trim() : ''; };
@@ -2709,6 +2857,7 @@ body.nonotes aside small{display:none}
   const SUM = {
     'Pills': () => { const p = S_().pill || {}; return `${p.shape || ''} ${p.shape === 'tablet' || p.shape === 'sphere' ? p.W : (p.L || '') + '×' + p.W} mm · ${txt('pMat').split(' (')[0]} · ${S_().count} pills`; },
     'Drive': () => `${txt('rpm')} rpm`,
+    'Singulator (bump at the entry)': () => $('sgOn') && $('sgOn').checked ? `${txt('sgAxis').split(' ')[0]} r ${txt('sgR')} mm · μ ${txt('sgMu')}` : 'off',
     'Sensors & feed control': () => txt('r_ct'),
     'Vibration (speaker)': () => /ON/.test(txt('vibBtn')) ? `ON · ${txt('vibF')} Hz · ${txt('vibA')} g` : 'off',
     'Foam belts': () => `${txt('foamType')} · ${txt('thick')} mm`,
