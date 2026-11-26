@@ -44,12 +44,44 @@ table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}td,th{bo
 #uiTools button{flex:0 0 auto;padding:4px 6px}
 body.nonotes aside small{display:none}
 .ff-hide{display:none!important}
+
+main{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#gl{flex:1 1 0;min-height:0;height:auto!important}
+#dock{position:relative;margin:6px auto 8px;flex:0 0 auto;z-index:6;background:#12161ddd;border:1px solid #2f3846;border-radius:14px;padding:10px 12px;box-shadow:0 6px 24px #0008;width:min(560px,calc(100% - 24px));display:flex;flex-direction:column;gap:8px}
+#dock button{border-radius:10px!important;flex:0 0 auto}
+#dkStat{font-size:15px;text-align:center;color:#cfe3ff;min-height:20px}
+#dkStat.busy{color:#ffe08a} #dkStat.err{color:#ff8080}
+.dkRow{display:flex;gap:8px;align-items:stretch}
+.dkN{display:flex;align-items:center;gap:4px;background:#1b212b;border:1px solid #38414f;border-radius:10px;padding:3px}
+.dkN button{width:44px;height:52px;font-size:26px;padding:0;background:#232a36}
+#dkNum{min-width:44px;text-align:center;font-size:26px;font-weight:700}
+#dkGo{flex:1 1 auto!important;background:#1f9d47;border:2px solid #4fdc7b;color:#fff;font-size:22px;font-weight:800;letter-spacing:.5px;padding:12px 10px}
+#dkGo:hover{background:#25b653} #dkGo:active{background:#178a3c}
+#dkStop{background:#b3262e;border:2px solid #ff6b72;color:#fff;font-size:20px;font-weight:800;padding:12px 16px}
+#dkStop:hover{background:#cf2f38}
+.dkRow2{display:flex;gap:6px}
+.dkRow2 button{flex:1 1 0!important;padding:8px 6px;font-size:14px}
+#dkRun.on{background:#1f4f9c;border-color:#3b79d6}
+#dkRej{display:flex;gap:8px;align-items:center;justify-content:space-between;background:#3a1416;border:1px solid #f66;border-radius:8px;padding:6px 8px;color:#ffd6d6;font-weight:700}
+#hint{position:absolute;left:50%;top:52px;transform:translateX(-50%);z-index:6;background:#1f4f9cee;color:#fff;border-radius:10px;padding:8px 12px;font-size:14px;max-width:min(640px,calc(100% - 24px));box-shadow:0 4px 16px #0007}
+#hint button{margin-left:8px;border-radius:6px!important;background:#fff;color:#1f4f9c;font-weight:700}
+.stepH{margin:14px 4px 6px;font-size:13px;font-weight:800;letter-spacing:.6px;color:#8fd19e;text-transform:uppercase;border-bottom:1px solid #2a3a2e;padding-bottom:3px}
+aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
+@media (max-width:900px){
+ aside{padding-bottom:170px!important}
+ #dock{position:fixed;left:0;right:0;bottom:0;transform:none;width:auto;border-radius:14px 14px 0 0;padding:8px}
+ #dkGo{font-size:19px;padding:10px 6px} #dkStop{font-size:17px;padding:10px 10px}
+ .dkN button{width:40px;height:46px}
+ body{padding-bottom:150px}
+ #hint{top:auto;bottom:160px;position:fixed}
+}
 </style></head><body><div id="app">
 <aside>
 <h2>Foam belts</h2>
 <div class="row"><label>Foam type</label><select id="foamType" style="grid-column:2/4"></select></div>
 <div class="row"><label for="shore" title="scales modulus: E = 9.8 kPa x exp(0.052 x S00) x material factor">Hardness (Shore 00)</label><input type="range" id="shore" min="20" max="95" step="1" value="40"><span class="v"><span id="shoreV"></span></span></div>
 <div class="row"><label for="thick" title="foam layer over the idler bearings / cam. 4.0 mm matches the CAD">Foam thickness</label><input type="range" id="thick" min="1" max="5.5" step="0.1" value="4.5"><span class="v"><span id="thickV"></span> mm</span></div>
+<div class="note" id="thickFlag" style="display:none;margin:4px 0;border:1px solid #d9a441;border-radius:6px;padding:6px;background:#2e2612"></div>
 <div class="note" id="ild" style="margin:4px 0"></div>
 <canvas id="cSS" class="ch" width="300" height="110"></canvas>
 <small>blue = loading curve, orange dashed = unloading (hysteresis)</small>
@@ -101,10 +133,22 @@ body.nonotes aside small{display:none}
 <div class="row"><label for="hmPill" title="gelatin shells take hours to days to take up or lose water, so their tack follows the long-run chamber humidity, not each gate opening">Pill moisture</label><select id="hmPill" style="grid-column:2/4"><option value="avg">follows long-run chamber average</option><option value="manual">set by hand</option></select></div>
 <div class="row"><label for="hmMan">Pill RH (by hand)</label><input type="range" id="hmMan" min="10" max="95" step="1" value="50"><span class="v"><span id="hmManV">50</span> %</span></div>
 <div class="kv"><b>Chamber now</b><span id="r_hmNow">—</span><b>Long-run average</b><span id="r_hmAvg">—</span><b>Gel-cap tack</b><span id="r_hmTack">—</span></div>
+<h2>Dispenser bank</h2>
+<small>Run a bank of up to 32 dispensers. Only the one being called is simulated; the rest are frozen with the pills still inside them. Calls wait their turn and run one at a time, like the real machine. Pick a dispenser in the green bar (or press <b>Call</b> here) and press DISPENSE.</small>
+<div class="row"><label for="bkN" title="how many dispensers in the machine">Dispensers</label><input type="number" id="bkN" min="1" max="32" value="1" style="width:70px"></div>
+<div class="row"><label for="bkCols" title="dispensers per row">Per row</label><input type="number" id="bkCols" min="1" max="32" value="8" style="width:70px"></div>
+<div class="row"><label for="bkPx" title="centre-to-centre spacing side by side (mm)">Spacing across</label><input type="number" id="bkPx" min="10" max="300" step="0.5" value="50" style="width:70px"><span class="v">mm</span></div>
+<div class="row"><label for="bkPy" title="spacing between rows, front to back (mm)">Row spacing</label><input type="number" id="bkPy" min="10" max="400" step="0.5" value="110" style="width:70px"><span class="v">mm</span></div>
+<div style="max-height:260px;overflow:auto;border:1px solid #2a303b;border-radius:6px;margin:4px 0"><table id="bkTbl" style="width:100%;border-collapse:collapse;font-size:12px"></table></div>
+<div class="row"><label>Edit dispenser <b id="bkSelN">#1</b></label></div>
+<div class="row"><label for="bkMed" title="what this dispenser holds (shown in the list and the green bar)">Medication</label><input type="text" id="bkMed" style="grid-column:2/4"></div>
+<div class="row"><label for="bkPill">Pill</label><select id="bkPill" style="grid-column:2/4"></select></div>
+<div class="row"><label for="bkCount" title="pills in a full load">Pills per load</label><input type="number" id="bkCount" min="1" max="150" style="width:70px"></div>
+<div class="btns"><button id="bkRefill" title="refill this dispenser with a full load">⟳ Refill this dispenser</button></div>
 <h2>Sensors &amp; feed control</h2>
-<div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="continuous">Continuous (belts always run)</option><option value="feed">Feed on demand (sensor stops it)</option></select></div>
-<div class="row"><label for="ctN" title="how many pills one press of Dispense delivers">How many pills</label><span style="grid-column:2/4;display:flex;gap:6px;align-items:center"><button id="ctNm" title="one fewer" style="width:34px">−</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:56px;text-align:center"><button id="ctNp" title="one more" style="width:34px">+</button></span></div>
-<div class="btns"><button id="btnFeed" class="pri" style="flex:2" title="open the gate, run the conveyor (and vibrator) until the exit sensor has counted the number of pills set above, then stop">▶ Dispense 1 pill</button><button id="btnFeedN" style="display:none"></button><button id="btnFeedStop">■ Stop</button></div>
+<div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="feed">Dispense on demand (counts pills, stops)</option><option value="continuous">Run nonstop (no counting)</option></select></div>
+<div class="row" style="display:none"><label for="ctN" title="how many pills one press of Dispense delivers">How many pills</label><span style="grid-column:2/4;display:flex;gap:6px;align-items:center"><button id="ctNm" title="one fewer" style="width:34px">−</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:56px;text-align:center"><button id="ctNp" title="one more" style="width:34px">+</button></span></div>
+<div class="btns" style="display:none"><button id="btnFeed" class="pri" style="flex:2" title="open the gate, run the conveyor (and vibrator) until the exit sensor has counted the number of pills set above, then stop">▶ Dispense 1 pill</button><button id="btnFeedN" style="display:none"></button><button id="btnFeedStop">■ Stop</button></div>
 <div id="rejBox" style="display:none;border:1px solid #f66;background:#3a1416;color:#ffd6d6;border-radius:6px;padding:6px 8px;margin:4px 0"><b style="color:#ff8080">⛔ LOT REJECTED — signal sent to host</b><div id="rejWhy" style="font-size:12px;margin:3px 0"></div><button id="btnRejClr" title="acknowledge: the lot has been pulled. Dump new load also clears it">Acknowledge · new lot</button></div>
 <div class="kv"><b>Controller</b><span id="r_ct"></span><b>Sensors</b><span id="r_sens"></span><b>Last feed</b><span id="r_feed"></span><b>Feeds</b><span id="r_feeds"></span><b>Time to pill</b><span id="r_ttp"></span></div>
 <div class="row"><label for="pbOn" title="S1 measures every pill's length from belt travel while it blocks the beam (between the drive wheels a gripped pill moves at belt speed). The host knows which pill is in this cartridge and its size from the pill database; a block longer than the pill can be in any orientation means two pills stacked/touching: the belts reverse until everything in the conveyor is back in the hopper, then the feed tries again">Stacked-double check (S1)</label><input type="checkbox" id="pbOn" checked style="justify-self:start"></div>
@@ -147,6 +191,38 @@ body.nonotes aside small{display:none}
 
 <div class="row"><label for="snEdge" title="count when the beam is broken (fastest) or when it clears again (pill fully past)">Count on</label><select id="snEdge" style="grid-column:2/4"><option value="break">beam break</option><option value="clear">beam clear (pill past)</option></select></div>
 <small>S1 Length probe sits across the belt gap inside the conveyor (default 22 mm above the bottom idler) and measures each pill's length from belt travel, S2 Exit in the exit chute (stops the feed, marked *), S3 Out under the gate. Beams are drawn as red lines (bright when blocked). Sensors also count in Continuous mode.</small>
+<h2>Imported parts</h2>
+<small>Add your own STL / OBJ parts — a manifold, collector, chute, bin — anywhere in the scene. Pills collide with them using the friction and bounciness you set. Coordinates are the CAD's, in mm: <b>X</b> across the machine (left → right), <b>Y</b> front → back, <b>Z</b> up. The pill outlet (under the gate) is at about X 22.5, Y 20, Z −2.</small>
+<div class="btns"><label class="btns" style="margin:0;flex:1"><button class="pri" onclick="document.getElementById('xpFile').click()" style="width:100%">＋ Import part (STL / OBJ / STEP)</button></label><input type="file" id="xpFile" accept=".stl,.obj,.step,.stp" multiple style="display:none"></div>
+<div class="row"><label for="xpSel">Part</label><select id="xpSel" style="grid-column:2/4"><option value="">— no parts yet —</option></select></div>
+<div id="xpEd" style="display:none">
+<div class="row"><label for="xpName">Name</label><input type="text" id="xpName" style="grid-column:2/4"></div>
+<div class="row"><label for="xpUnit" title="units the file was exported in">File units</label><select id="xpUnit" style="grid-column:2/4"><option value="1">millimetres</option><option value="25.4">inches</option><option value="10">centimetres</option><option value="1000">metres</option></select></div>
+<div class="btns"><button id="xpPlace" title="move the part so the middle of its top sits right under the pill outlet">⤓ Put under the outlet</button><button id="xpZero" title="back to where the file put it">Reset position</button></div>
+<div class="row"><label for="xpX" title="move left / right (mm)">Move X</label><input type="range" id="xpX" min="-200" max="200" step="0.5" value="0"><span class="v"><input type="number" id="xpXn" step="0.5" style="width:64px"></span></div>
+<div class="row"><label for="xpY" title="move front / back (mm)">Move Y</label><input type="range" id="xpY" min="-200" max="200" step="0.5" value="0"><span class="v"><input type="number" id="xpYn" step="0.5" style="width:64px"></span></div>
+<div class="row"><label for="xpZ" title="move down / up (mm)">Move Z</label><input type="range" id="xpZ" min="-300" max="200" step="0.5" value="0"><span class="v"><input type="number" id="xpZn" step="0.5" style="width:64px"></span></div>
+<div class="row"><label for="xpRx" title="tilt about X (degrees, about the part's centre)">Rotate X</label><input type="range" id="xpRx" min="-180" max="180" step="1" value="0"><span class="v"><input type="number" id="xpRxn" step="1" style="width:64px"></span></div>
+<div class="row"><label for="xpRy" title="tilt about Y (degrees)">Rotate Y</label><input type="range" id="xpRy" min="-180" max="180" step="1" value="0"><span class="v"><input type="number" id="xpRyn" step="1" style="width:64px"></span></div>
+<div class="row"><label for="xpRz" title="turn about the vertical (degrees)">Rotate Z</label><input type="range" id="xpRz" min="-180" max="180" step="1" value="0"><span class="v"><input type="number" id="xpRzn" step="1" style="width:64px"></span></div>
+<div class="row"><label for="xpSc" title="uniform scale about the part's centre">Scale</label><input type="range" id="xpSc" min="0.1" max="4" step="0.01" value="1"><span class="v"><input type="number" id="xpScn" step="0.01" style="width:64px"></span></div>
+<div class="row"><label for="xpMat" title="sets friction and bounciness for common materials; adjust below">Material</label><select id="xpMat" style="grid-column:2/4"><option value="">custom</option><option value="0.35,0.45">PLA (printed)</option><option value="0.3,0.45">PETG</option><option value="0.4,0.55">Acrylic (smooth)</option><option value="0.25,0.6">Stainless steel (polished)</option><option value="0.12,0.4">PTFE / Teflon</option><option value="0.2,0.4">Acetal (Delrin)</option><option value="0.9,0.2">Silicone rubber</option><option value="0.5,0.1">Foam / felt (dead)</option></select></div>
+<div class="row"><label for="xpMu" title="sliding friction between a pill and this part">Friction</label><input type="range" id="xpMu" min="0" max="1.2" step="0.01" value="0.35"><span class="v"><span id="xpMuV">0.35</span></span></div>
+<div class="row"><label for="xpRest" title="how much a pill bounces off it (0 = dead stop, 0.9 = very bouncy)">Bounciness</label><input type="range" id="xpRest" min="0" max="0.9" step="0.01" value="0.45"><span class="v"><span id="xpRestV">0.45</span></span></div>
+<div class="row"><label for="xpSolid" title="off = ghost: drawn but pills pass through">Solid</label><input type="checkbox" id="xpSolid" checked style="justify-self:start"></div>
+<div class="row"><label for="xpCount" title="count every pill that touches this part (e.g. the common collector)">Count pills reaching it</label><input type="checkbox" id="xpCount" style="justify-self:start"></div>
+<div class="row"><label for="xpCol">Colour / see-through</label><input type="color" id="xpCol" value="#9ad0ff" style="width:44px;padding:0"><input type="range" id="xpA" min="0.1" max="1" step="0.05" value="0.6"></div>
+<div class="kv"><b>Size</b><span id="r_xpSize">—</span><b>Pills reached</b><span id="r_xpHits">—</span></div>
+<div class="btns"><button id="xpDup">Duplicate</button><button id="xpDel">Remove part</button></div>
+</div>
+<div class="note" id="xpInfo"></div>
+<h2>Machine model</h2>
+<small>Load your whole assembly as a STEP file. Every solid becomes a part; its role is guessed from its name (you can change any of them). The conveyor is found from the two <b>Belt</b> parts and the drive wheels from the <b>Drive wheel</b> parts, then the simulator rebuilds around them. To try one new version of a part, use <b>Replace…</b> on that row.</small>
+<div class="btns"><button class="pri" id="mdLoad" title="STEP / STP assembly (all parts, names kept)">⇪ Load assembly (STEP)</button><input type="file" id="mdFile" accept=".step,.stp,.STEP,.STP" style="display:none"><button id="mdOrig" title="go back to the built-in FoamFeed model">Built-in model</button></div>
+<div class="note" id="mdInfo">Using the built-in FoamFeed model.</div>
+<div id="mdTblW" style="display:none;max-height:340px;overflow:auto;border:1px solid #2a303b;border-radius:6px;margin:4px 0"><table id="mdTbl" style="width:100%;border-collapse:collapse;font-size:12px"></table></div>
+<div class="btns" id="mdBtns" style="display:none"><button class="pri" id="mdApply" title="rebuild the simulator from this model with the roles in the table">✔ Use this model</button><button id="mdFind" title="only locate the conveyor and drive wheels from the tagged parts and report them">Find conveyor</button></div>
+<input type="file" id="mdRepFile" accept=".step,.stp,.stl,.obj" style="display:none">
 <h2>Belt texture</h2>
 <small>Paint one tile of the belt surface. It repeats seamlessly around both belts and is part of the physics: ridges stand proud of the foam, grooves are cut into it, and their flanks push pills sideways / along. Arrow = direction of belt travel.</small>
 <div class="seg" id="texTool"><button data-t="1" class="on">▲ Ridge</button><button data-t="-1">▼ Groove</button><button data-t="0">Erase</button></div>
@@ -191,7 +267,15 @@ body.nonotes aside small{display:none}
 <small>Changing shape, size or density rebuilds the load; friction changes are live.</small>
 </aside>
 <main style="position:relative"><canvas id="gl"></canvas>
-<div id="bar"><button data-cam="iso">Iso</button><button data-cam="side">Side</button><button data-cam="front">Front</button><button data-cam="top">Top</button><button data-cam="belts">Belts</button><button data-cam="face">Face</button><button data-cam="nip">Nip</button><button id="btnPause">⏸ Pause</button><button id="helpBtn">? Help</button></div></main>
+<div id="bar"><button data-cam="iso">Iso</button><button data-cam="side">Side</button><button data-cam="front">Front</button><button data-cam="top">Top</button><button data-cam="belts">Belts</button><button data-cam="face">Face</button><button data-cam="nip">Nip</button><button data-cam="all" title="zoom out to show the machine and every imported part">Fit all</button><button id="btnPause">⏸ Pause</button><button id="helpBtn">? Help</button></div>
+<div id="hint">New here? <b>1.</b> Pick a pill under <b>What to dispense</b>. <b>2.</b> Press the big green <b>DISPENSE</b> button. <b>3.</b> Watch the counts under <b>Results</b>. <button id="hintX" title="hide this tip">Got it</button></div>
+<div id="dock">
+ <div id="dkStat">Ready — press DISPENSE</div>
+ <div id="dkRej" style="display:none"><span id="dkRejT">⛔ LOT REJECTED</span><button id="dkRejOk">Acknowledge · new lot</button></div>
+ <div class="dkRow" id="dkUnitW" style="display:none"><label for="dkUnit" style="align-self:center;font-weight:700;white-space:nowrap">Dispenser</label><select id="dkUnit" style="flex:1 1 auto;font-size:15px;padding:8px;border-radius:10px;min-width:0"></select></div>
+ <div class="dkRow"><span class="dkN"><button id="dkMinus" title="one fewer pill">−</button><span id="dkNum">1</span><button id="dkPlus" title="one more pill">+</button></span><button id="dkGo" title="dispense this many pills">▶ DISPENSE 1 PILL</button><button id="dkStop" title="stop the belts now">■ STOP</button></div>
+ <div class="dkRow2"><button id="dkLoad" title="empty the machine and drop a fresh load of pills into the hopper">⟳ Refill hopper</button><button id="dkRun" title="run the belts nonstop (no counting) — for throughput tests">⇉ Run nonstop</button><button id="dkPause" title="freeze / resume the simulation">⏸ Pause</button></div>
+</div></main>
 <div id="mtabs"><button data-mt="ctl" class="on">Controls</button><button data-mt="res">Results</button></div>
 <aside class="r">
 <h2>Dispensing</h2>
@@ -650,10 +734,10 @@ body.nonotes aside small{display:none}
     const F = cad.frame, O = F.O, ex = F.ex, eu = F.eu, ev = F.ev, R = 5 + foamH_mm + (texH_mm || 0) + 0.3, R2 = R * R;
     const L = i => { const d0 = v[i * 3] - O[0], d1 = v[i * 3 + 1] - O[1], d2 = v[i * 3 + 2] - O[2]; return [d0 * ex[0] + d1 * ex[1] + d2 * ex[2], d0 * eu[0] + d1 * eu[1] + d2 * eu[2], d0 * ev[0] + d1 * ev[1] + d2 * ev[2]]; };
     const inside = p => { if (p[1] <= U_MIN || p[2] < -0.3 || p[2] > g.W + 0.3) return false;
-      for (const xc of [0, 22.99]) { const tu = Math.min(Math.max(p[1], g.uBot), g.uTop), dx = p[0] - xc, du = p[1] - tu; if (dx * dx + du * du < R2) return true; } return false; };
+      for (const xc of [0, cad.frame.xb || 22.99]) { const tu = Math.min(Math.max(p[1], g.uBot), g.uTop), dx = p[0] - xc, du = p[1] - tu; if (dx * dx + du * du < R2) return true; } return false; };
     const near = (a, b, c) => { const lo = [0, 1, 2].map(k => Math.min(a[k], b[k], c[k])), hi = [0, 1, 2].map(k => Math.max(a[k], b[k], c[k]));
       if (hi[1] <= U_MIN || lo[1] > g.uTop + R || hi[2] < -0.3 || lo[2] > g.W + 0.3) return false;
-      return [0, 22.99].some(xc => hi[0] > xc - R && lo[0] < xc + R); };
+      return [0, cad.frame.xb || 22.99].some(xc => hi[0] > xc - R && lo[0] < xc + R); };
     const P = [], T = [], loc = [];
     const W = p => [O[0] + p[0] * ex[0] + p[1] * eu[0] + p[2] * ev[0], O[1] + p[0] * ex[1] + p[1] * eu[1] + p[2] * ev[1], O[2] + p[0] * ex[2] + p[1] * eu[2] + p[2] * ev[2]];
     const add = p => { const w = W(p); P.push(w[0], w[1], w[2]); return P.length / 3 - 1; };
@@ -793,7 +877,7 @@ body.nonotes aside small{display:none}
     opts = opts || {};
     const P = Object.assign({}, DEFAULTS, opts.params || {});
     const F = cad.frame, O = F.O.map(v => v * 1e-3), EX = F.ex, EU = F.eu, EV = F.ev;
-    const geom = normGeom(opts.geom), U0 = geom.uBot * 1e-3, Lc = (geom.uTop - geom.uBot) * 1e-3, Rb = 5e-3, W = geom.W * 1e-3, XB = 22.99e-3;
+    const geom = normGeom(opts.geom), U0 = geom.uBot * 1e-3, Lc = (geom.uTop - geom.uBot) * 1e-3, Rb = 5e-3, W = geom.W * 1e-3, XB = (F.xb || 22.99) * 1e-3;
     // belt frame starts at the bottom idler: the cam (fixed in the CAD) sits at cu - uBot along the run
     const tables = buildBeltTables(Object.assign({}, cad.cam, { cu: cad.cam.cu - geom.uBot }), Lc, Rb);
     const foam = foamFromPreset(opts.foam || 'PU open-cell', opts.shore);
@@ -858,9 +942,10 @@ body.nonotes aside small{display:none}
       if (sim.stats.sqPkT != null) sim.stats.sqPkT = sh(sim.stats.sqPkT); };
     sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; sim.stats.escaped = 0; sim.stats.gateOpenS = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); sim.cells.dust[b].fill(0); } sim.wearT = 0; };
-    { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; }   // pills leave the model 5 mm below the lowest shell surface
+    { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; sim.floorZ0 = sim.floorZ; }   // pills leave the model 5 mm below the lowest shell surface
     sim.dustFx = { cap: 20000, head: 0, rs: 12345, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000) };
     sim.addPills = function (n, region) { return addPills(sim, n, region); };
+    sim.setExtraParts = function (list) { return setExtraParts(sim, list); };
     sim.setSingulator = function (o) { const old = sim.sing; sim.sing = singFrame(sim, o); if (sim.sing && old) { sim.sing.hits = old.hits; sim.sing.Fpk = old.Fpk; } sim.singOpts = o ? Object.assign({}, o) : null; return sim.sing; };
     if (opts.singulator) sim.setSingulator(opts.singulator);
     sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) stepOnce(sim); };
@@ -1624,6 +1709,53 @@ body.nonotes aside small{display:none}
     B.tx[i] += ry * Fz - rz * Fy; B.ty[i] += rz * Fx - rx * Fz; B.tz[i] += rx * Fy - ry * Fx;
     K.hits++; if (Fn > K.Fpk) K.Fpk = Fn;
   }
+  /* Imported parts (manifolds, collectors, any extra geometry): triangle meshes in world metres, each with its own
+     pill-part friction and bounciness. Same contact law as the CAD walls (penalty spring + damping per triangle, one
+     Cundall-Strack stick/slip spring per sphere per part). They are tested wherever pills are, so pills keep falling
+     and bouncing through downstream parts; the kill floor / box grow to include them. */
+  function setExtraParts(sim, list) {
+    const out = [];
+    for (const q of list || []) { if (!q || !q.tris || !q.tris.length) continue;
+      const g = q.grid || (q.grid = triGrid(q.tris, 6e-3, 4e-3));
+      out.push({ name: q.name || 'part', grid: g, mu: q.mu == null ? 0.35 : +q.mu, rest: q.rest == null ? null : +q.rest, solid: q.solid !== false, count: !!q.count, ref: q, xi: null, xs: null, xB: null }); }
+    sim.xp = out.length ? out : null;
+    // kill floor and box: CAD values, widened to every imported part (+5 mm below / 50 mm around)
+    let z0 = sim.floorZ0, bx = [-0.05, 0.1, -0.05, 0.2];
+    for (const p of out) { const g = p.grid; z0 = Math.min(z0, g.mn[2] - 5e-3); bx = [Math.min(bx[0], g.mn[0] - 0.05), Math.max(bx[1], g.mx[0] + 0.05), Math.min(bx[2], g.mn[1] - 0.05), Math.max(bx[3], g.mx[1] + 0.05)]; }
+    sim.floorZ = z0; sim.box = bx;
+    return sim.xp;
+  }
+  function extraContact(sim, B, i, k, X, Y, Z, rs, dt) {
+    const T = B.type[i];
+    for (const p of sim.xp) { if (!p.solid) continue; const GG = p.grid;
+      if (X < GG.mn[0] - rs || X > GG.mx[0] + rs || Y < GG.mn[1] - rs || Y > GG.mx[1] + rs || Z < GG.mn[2] - rs || Z > GG.mx[2] + rs) continue;
+      const ci = Math.floor((X - GG.mn[0]) / GG.cell), cj = Math.floor((Y - GG.mn[1]) / GG.cell), ck = Math.floor((Z - GG.mn[2]) / GG.cell);
+      if (ci < 0 || cj < 0 || ck < 0 || ci >= GG.dim[0] || cj >= GG.dim[1] || ck >= GG.dim[2]) continue;
+      const list = GG.cells.get((ci * GG.dim[1] + cj) * GG.dim[2] + ck); if (!list) continue;
+      const cp = _cp, bb = GG.bb, zeta = zetaOf(p.rest == null ? T.spec.rest : p.rest), kW = sim.P.contactFreq * sim.P.contactFreq * T.mass, cc = 2 * zeta * Math.sqrt(kW * T.mass);
+      let wFn = 0, wPen = -1, wnx = 0, wny = 0, wnz = 0, wrx = 0, wry = 0, wrz = 0, wvx = 0, wvy = 0, wvz = 0;
+      for (let li = 0; li < list.length; li++) { const bo = list[li] * 6;
+        if (X < bb[bo] - rs || X > bb[bo + 3] + rs || Y < bb[bo + 1] - rs || Y > bb[bo + 4] + rs || Z < bb[bo + 2] - rs || Z > bb[bo + 5] + rs) continue;
+        closestPtTri(X, Y, Z, GG.tris, list[li] * 9, cp);
+        const dx = X - cp[0], dy = Y - cp[1], dz = Z - cp[2], d2 = dx * dx + dy * dy + dz * dz; if (d2 >= rs * rs || d2 < 1e-18) continue;
+        const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, nz = dz / d, pen = rs - d, rx = cp[0] - B.px[i], ry = cp[1] - B.py[i], rz = cp[2] - B.pz[i];
+        const cvx = B.vx[i] + B.wy[i] * rz - B.wz[i] * ry, cvy = B.vy[i] + B.wz[i] * rx - B.wx[i] * rz, cvz = B.vz[i] + B.wx[i] * ry - B.wy[i] * rx, vn = cvx * nx + cvy * ny + cvz * nz;
+        B.nc[i]++; let Fd = -cc * vn; { const lim = 0.5 * meffOf(T, rx, ry, rz) * Math.abs(vn) / dt / B.ncp[i]; if (Fd > lim) Fd = lim; else if (Fd < -lim) Fd = -lim; }
+        let Fn = kW * pen + Fd; if (Fn < 0) Fn = 0;
+        wFn += Fn; if (pen > wPen) { wPen = pen; wnx = nx; wny = ny; wnz = nz; wrx = rx; wry = ry; wrz = rz; wvx = cvx - vn * nx; wvy = cvy - vn * ny; wvz = cvz - vn * nz; }
+        const Fx = Fn * nx, Fy = Fn * ny, Fz = Fn * nz;
+        B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz; B.lS[i] += Fn; B.lX[i] += Fx; B.lY[i] += Fy; B.lZ[i] += Fz;
+        B.tx[i] += ry * Fz - rz * Fy; B.ty[i] += rz * Fx - rx * Fz; B.tz[i] += rx * Fy - ry * Fx; }
+      if (wPen < 0) continue;
+      if (p.xB !== B) { p.xB = B; p.xi = new Float64Array(B.xiWS.length * 3); p.xs = new Int32Array(B.xiWS.length).fill(-9); }
+      const key = i * 64 + _si[k], fresh = p.xs[key] !== sim.steps; p.xs[key] = sim.steps + 1;
+      tangSpring(p.xi, key * 3, fresh, wnx, wny, wnz, wvx, wvy, wvz, T.mass / (1 + T.mass * (wrx * wrx + wry * wry + wrz * wrz) / T.Imin) / B.ncp[i], p.mu * wFn, dt);
+      const Fx = _ft[0], Fy = _ft[1], Fz = _ft[2];
+      B.fx[i] += Fx; B.fy[i] += Fy; B.fz[i] += Fz; B.tx[i] += wry * Fz - wrz * Fy; B.ty[i] += wrz * Fx - wrx * Fz; B.tz[i] += wrx * Fy - wry * Fx;
+      if (p.count) { (p.seen || (p.seen = new Set())).add(B.id[i]); }
+      p.Fpk = Math.max(p.Fpk || 0, wFn);
+    }
+  }
   function tangSpring(xi, o, fresh, nx, ny, nz, vtx, vty, vtz, mt, cap, dt) {
     let ex = fresh ? 0 : xi[o], ey = fresh ? 0 : xi[o + 1], ez = fresh ? 0 : xi[o + 2];
     { const m0 = Math.hypot(ex, ey, ez); if (m0 > 0) { const en = ex * nx + ey * ny + ez * nz; ex -= en * nx; ey -= en * ny; ez -= en * nz; const m1 = Math.hypot(ex, ey, ez); if (m1 > 1e-15) { const r = m0 / m1; ex *= r; ey *= r; ez *= r; } } }
@@ -1788,6 +1920,7 @@ body.nonotes aside small{display:none}
         }
       }
       if (sim.sing) singContact(sim, B, i, k, X, Y, Z, rs, dt);
+      if (sim.xp) extraContact(sim, B, i, k, X, Y, Z, rs, dt);
       if (!sim.noFoam) { foamContact(sim, B, i, X, Y, Z, rs, 0, dt, _si[k]); foamContact(sim, B, i, X, Y, Z, rs, 1, dt, _si[k]); }
     }
     const rotv = [0, 0, 0], wb = [0, 0, 0], tb = [0, 0, 0];
@@ -1816,7 +1949,9 @@ body.nonotes aside small{display:none}
       if (B.exitT[i] < 0 && u - sim.U0 < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 + 0.47 * Math.min(0, u - sim.U0 + sim.Rb + P.thickness) && v < sim.W + 3e-3) {
         B.exitT[i] = sim.t; sim.stats.exits.push({ t: sim.t, id: B.id[i], x }); sim.stats.dispensed++;
       }
-      if (B.pz[i] < (sim.floorZ ?? 0) || B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } else if (!sim.gate || (B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3)) sim.stats.delivered = (sim.stats.delivered || 0) + 1; else { sim.stats.escaped = (sim.stats.escaped || 0) + 1; (sim.stats.escLog || (sim.stats.escLog = [])).push([sim.t, B.id[i], B.px[i] * 1e3, B.py[i] * 1e3]); } }   // past the belts: down the drop hole = delivered; anywhere else (e.g. knocked out of the open front by the gate) = escaped
+      if (sim.xp && B.exitT[i] >= 0 && B.pz[i] < -6e-3) { const H = B.hole || (B.hole = new Int8Array(B.alive.length)); if (!H[i]) H[i] = B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3 ? 1 : 2; }   // with downstream parts: where it crossed the gate plane decides delivered / escaped
+      const bx = sim.box;
+      if (B.pz[i] < (sim.floorZ ?? 0) || (bx ? (B.py[i] < bx[2] || B.py[i] > bx[3] || B.px[i] < bx[0] || B.px[i] > bx[1]) : (B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1))) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } else if (!sim.gate || (B.hole && B.hole[i] ? B.hole[i] === 1 : (B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3))) sim.stats.delivered = (sim.stats.delivered || 0) + 1; else { sim.stats.escaped = (sim.stats.escaped || 0) + 1; (sim.stats.escLog || (sim.stats.escLog = [])).push([sim.t, B.id[i], B.px[i] * 1e3, B.py[i] * 1e3]); } }   // past the belts: down the drop hole = delivered; anywhere else (e.g. knocked out of the open front by the gate) = escaped
     }
     sim.t += dt; sim.steps++; sim.wearT += dt;
     // pill loads. Squeeze = compressive part of the contact normal forces: (sum |F_n| - |sum F_n|) / 2 -- for a pill
@@ -1838,7 +1973,7 @@ body.nonotes aside small{display:none}
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, gelTackFactor, gateStroke, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, beltPoint, newCtrl, newSensor, sensorGeom, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, gelTackFactor, gateStroke, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -1852,7 +1987,7 @@ body.nonotes aside small{display:none}
   const S = {
     foamName: 'Silicone sponge', shore: 40, thick: 4.5, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
-    count: 10, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, shellAlpha: 0.12, showHeat: true, camPhase: 0, glass: true, vib: { on: false, freq: 40, accel_g: 0.5, axis: 'plate' },
+    count: 10, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, shellAlpha: 0.12, showHeat: true, camPhase: 0, glass: true, vib: { on: true, freq: 40, accel_g: 0.5, axis: 'plate' },
     geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, crushN: null, loadCol: false, dustShow: true, dustTack: true, dustStatic: 1, sing: { on: false, axis: 'v', u_mm: 11, x_mm: 0, v_mm: 0, len_mm: 3, r_mm: 1.5, mu: 0.3 }, ctrl: null,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
   };
   let sim = null, pending = null;
@@ -1869,7 +2004,7 @@ body.nonotes aside small{display:none}
   function applyParams() {
     if (!sim) return;
     if (typeof TEX !== 'undefined' && sim.cells) applyTex();
-    applyVib(); applyTire(); applyHum(); applySing(); sim.P.dustTack = S.dustTack ? 1 : 0; sim.P.dustStatic = S.dustStatic;
+    applyVib(); applyTire(); applyHum(); applySing(); xpApply(); sim.P.dustTack = S.dustTack ? 1 : 0; sim.P.dustStatic = S.dustStatic;
     if (S.ctrl && S.ctrl.mode === 'feed' && sim.ctrl) sim.ctrl.rpmRun = S.rpm; else sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1;
     applyCtrl();
   }
@@ -1942,10 +2077,10 @@ body.nonotes aside small{display:none}
 
   /* ---------------------------------------------------------------- CAD parts */
   const ROLECOL = { block: [0.55, 0.62, 0.72], gate: [0.93, 0.8, 0.32], servo: [0.22, 0.32, 0.62], link: [0.86, 0.55, 0.28], hopper: [0.55, 0.7, 0.95], plate: [0.62, 0.64, 0.68], cam: [0.95, 0.82, 0.45], worm: [0.85, 0.65, 0.2], motor: [0.28, 0.3, 0.34], static: [0.6, 0.62, 0.66] };
-  const F = CAD.frame; const OM = F.O, EX = F.ex, EU = F.eu, EV = F.ev;
+  let F = CAD.frame, OM = F.O, EX = F.ex, EU = F.eu, EV = F.ev;
   const wpt = (x, u, v) => [OM[0] + x * EX[0] + u * EU[0] + v * EV[0], OM[1] + x * EX[1] + u * EU[1] + v * EV[1], OM[2] + x * EX[2] + u * EU[2] + v * EV[2]];
   // idler assemblies (bearing stacks + shafts + washers) at the four pulley centres, frame-local mm
-  const IDLERS = [[0, 0, 'bot', 0], [22.99, 0, 'bot', 1], [0, 28.778, 'top', 0], [22.99, 28.778, 'top', 1]];
+  let IDLERS = [[0, 0, 'bot', 0], [22.99, 0, 'bot', 1], [0, 28.778, 'top', 0], [22.99, 28.778, 'top', 1]];
   const toLoc = (X, Y, Z) => { const d = [X - OM[0], Y - OM[1], Z - OM[2]]; return [d[0] * EX[0] + d[1] * EX[1] + d[2] * EX[2], d[0] * EU[0] + d[1] * EU[1] + d[2] * EU[2], d[0] * EV[0] + d[1] * EV[1] + d[2] * EV[2]]; };
   function partInfo(p, v) {   // classify once: which idler it belongs to, and whether it is an outer race or a ball
     if (p._info) return p._info;
@@ -1979,11 +2114,18 @@ body.nonotes aside small{display:none}
   const parts = [];
   let glassMeshGL = null;
   function rebuildGlass() { const g = FFx.glassMesh(CAD, simGeom()); glassMeshGL = mkMesh(g.v, g.t, null, null, false); }
-  const pivA = wpt(CAD.cam.cx, CAD.cam.cu, 4), pivB = wpt(CAD.cam.cxB, CAD.cam.cuB, 4);
-  const wormP = wpt(CAD.worm.c[0], CAD.worm.c[1], CAD.worm.c[2]);
+  let pivA = wpt(CAD.cam.cx, CAD.cam.cu, 4), pivB = wpt(CAD.cam.cxB, CAD.cam.cuB, 4);
+  let wormP = wpt(CAD.worm.c[0], CAD.worm.c[1], CAD.worm.c[2]);
+  // a new machine model moves the conveyor frame: re-derive everything the renderer caches from it
+  function refreshFrame() { F = CAD.frame; OM = F.O; EX = F.ex; EU = F.eu; EV = F.ev; const xb = F.xb || 22.99;
+    IDLERS = [[0, 0, 'bot', 0], [xb, 0, 'bot', 1], [0, FFx.GEOM0.uTop, 'top', 0], [xb, FFx.GEOM0.uTop, 'top', 1]];
+    pivA = wpt(CAD.cam.cx, CAD.cam.cu, 4); pivB = wpt(CAD.cam.cxB ?? xb - CAD.cam.cx, CAD.cam.cuB ?? CAD.cam.cu, 4); wormP = CAD.worm ? wpt(CAD.worm.c[0], CAD.worm.c[1], CAD.worm.c[2]) : wpt(xb / 2, 0, 0); }
 
   /* ---------------------------------------------------------------- pill meshes */
   let pillMesh = null;
+  // dispenser bank (up to 32 cartridges): only BANK.cur is simulated; the others are frozen snapshots
+  const BANK = { n: 1, cur: 0, cols: 8, pitchX: 50, pitchY: 110, units: [], q: [] };
+  const bankOff = k => { const c = k % BANK.cols, r = Math.floor(k / BANK.cols); return [c * BANK.pitchX, r * BANK.pitchY, 0]; };
   function revolve(prof, seg, axisX) { // prof: [[r,z]...] open polyline from bottom pole to top pole; returns pos,nrm,idx (smooth)
     const P = [], N = [], I = [], n = prof.length;
     for (let s = 0; s <= seg; s++) { const a = s / seg * TAU, c = Math.cos(a), sn = Math.sin(a);
@@ -1992,8 +2134,8 @@ body.nonotes aside small{display:none}
     for (let s = 0; s < seg; s++) for (let i = 0; i < n - 1; i++) { const a = s * n + i, b = (s + 1) * n + i; I.push(a, b, a + 1, b, b + 1, a + 1); }
     return { P: new Float32Array(P), N: new Float32Array(N), I: new Uint32Array(I) };
   }
-  function buildPillMesh() {
-    const sp = sim.pillType.spec; let g;
+  function buildPillMesh(spIn) {
+    const sp = spIn || sim.pillType.spec; let g;
     const arc = (cx, cz, r, a0, a1, k) => { const o = []; for (let i = 0; i <= k; i++) { const a = a0 + (a1 - a0) * i / k; o.push([cx + r * Math.cos(a), cz + r * Math.sin(a)]); } return o; };
     if (sp.shape === 'sphere' || sp.shape === 'ellipsoid') {
       const prof = arc(0, 0, 1, -PI / 2, PI / 2, 18).map(([r, z]) => [Math.max(r, 0), z]); g = revolve(prof, 28, false);
@@ -2008,8 +2150,10 @@ body.nonotes aside small{display:none}
       const prof = arc(0, -hs, r, -PI / 2, 0, 10).map(([rr, z]) => [Math.max(rr, 0), z]).concat(arc(0, hs, r, 0, PI / 2, 10).map(([rr, z]) => [Math.max(rr, 0), z]));
       g = revolve(prof, 28, true);
     }
-    pillMesh = mkMesh(g.P, g.I, g.N, null, false);
+    const mm = mkMesh(g.P, g.I, g.N, null, false); if (!spIn) pillMesh = mm; return mm;
   }
+  const pillMeshes = new Map();
+  function pillMeshFor(pill) { const T = FFx.makePillType(FFx.normSpec(pill)), key = JSON.stringify(T.spec); let m = pillMeshes.get(key); if (!m) { m = buildPillMesh(T.spec); pillMeshes.set(key, m); } return m; }
   function hsv(h) { const i = Math.floor(h * 6), f = h * 6 - i, p = 0.35, q = 1 - f * 0.65, t = 0.35 + f * 0.65; return [[1, t, p], [q, 1, p], [p, 1, t], [p, q, 1], [t, p, 1], [1, p, q]][i % 6].map(v => v * 0.9); }
 
   /* ---------------------------------------------------------------- belt meshes (deformable) */
@@ -2064,7 +2208,13 @@ body.nonotes aside small{display:none}
   function camPos() { return [cam.t[0] + cam.d * Math.cos(cam.el) * Math.sin(cam.az), cam.t[1] - cam.d * Math.cos(cam.el) * Math.cos(cam.az), cam.t[2] + cam.d * Math.sin(cam.el)]; }
   const PRESETS = { iso: { az: -0.6, el: 0.45, d: 240, t: [22, 55, 85] }, side: { az: PI / 2, el: 0.0, d: 330, t: [22, 55, 85] }, front: { az: 0, el: 0.0, d: 330, t: [22, 55, 85] }, top: { az: 0, el: 1.55, d: 300, t: [22, 55, 85] },
     belts: { az: -0.5, el: 0.35, d: 120, t: [22, 48, 62] }, face: { az: 0, el: 0.439, d: 150, t: [22, 48, 62] }, nip: { az: 0, el: 0.439, d: 75, t: [22, 46, 58] } };
-  function setPreset(n) { Object.assign(cam, JSON.parse(JSON.stringify(PRESETS[n]))); }
+  function setPreset(n) { if (n === 'all') return fitAll(); Object.assign(cam, JSON.parse(JSON.stringify(PRESETS[n]))); }
+  // frame the machine plus every imported part (iso angle)
+  function fitAll() { let mn = [-5, 0, -10], mx = [50, 110, 190]; const base = Math.hypot(55, 110, 200);
+    { const o = bankOff(BANK.cur), e = bankOff(Math.max(0, BANK.n - 1)), cols = Math.min(BANK.n, BANK.cols); const ex = [(cols - 1) * BANK.pitchX, e[1], 0];   // machine box in bank coordinates (active one at its slot)
+      void o; mx = mx.map((x, a) => x + ex[a]); }
+    for (const p of (typeof XP !== 'undefined' ? XP : [])) if (p.bb) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], p.bb[0][a]); mx[a] = Math.max(mx[a], p.bb[1][a]); }
+    const ext = Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]); Object.assign(cam, { az: -0.6, el: 0.45, d: 240 * Math.max(1, ext / base), t: [0, 1, 2].map(a => (mn[a] + mx[a]) / 2) }); }
   // camera: mouse (left = orbit, right/shift = pan, wheel = zoom) and touch (1 finger = orbit, 2 fingers = pinch zoom + pan)
   const ptrs = new Map(); let drag = null, pinch = null;
   const orbit = (dx, dy) => { cam.az -= dx * 0.006; cam.el = Math.max(-1.5, Math.min(1.55, cam.el + dy * 0.006)); };
@@ -2089,8 +2239,10 @@ body.nonotes aside small{display:none}
     const w = cv.clientWidth, h = cv.clientHeight, dpr = Math.min(devicePixelRatio || 1, 2);
     if (cv.width !== (w * dpr | 0) || cv.height !== (h * dpr | 0)) { cv.width = w * dpr | 0; cv.height = h * dpr | 0; }
     gl.viewport(0, 0, cv.width, cv.height); gl.clearColor(0.075, 0.085, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const eye = camPos(), VP = m4.mul(m4.persp(0.7, w / h, 5, 3000), m4.look(eye, cam.t, [0, 0, 1]));
-    gl.uniformMatrix4fv(U.uVP, false, VP); gl.uniform3fv(U.uCam, eye); gl.uniform4f(U.uClip, 1, 0, 0, S.sectionX); gl.uniform1i(U.uClipOn, S.sectionOn ? 1 : 0);
+    const eye = camPos(), VPw = m4.mul(m4.persp(0.7, w / h, 5, 3000), m4.look(eye, cam.t, [0, 0, 1]));
+    // dispenser bank: the active dispenser is simulated in its own CAD coordinates; it is drawn at its slot in the bank
+    const bo = bankOff(BANK.cur), Tb = m4.ident(); Tb[12] = bo[0]; Tb[13] = bo[1]; Tb[14] = bo[2]; const VP = m4.mul(VPw, Tb);
+    gl.uniformMatrix4fv(U.uVP, false, VP); gl.uniform3fv(U.uCam, [eye[0] - bo[0], eye[1] - bo[1], eye[2] - bo[2]]); gl.uniform4f(U.uClip, 1, 0, 0, S.sectionX); gl.uniform1i(U.uClipOn, S.sectionOn ? 1 : 0);
     gl.disable(gl.BLEND); const I = m4.ident();
     const thA = sim.thetaLoc[0], thB = sim.thetaLoc[1];
     const MA = m4.axisAngleAbout(EV, thA, pivA), MB = m4.axisAngleAbout(EV, -thB, pivB), MW = m4.axisAngleAbout(EU, -sim.theta * sim.P.wormRatio, wormP);
@@ -2121,6 +2273,8 @@ body.nonotes aside small{display:none}
       let c = hsv(B.hue[i]); if (S.loadCol) { const f = Math.min(1, (B.sq[i] || 0) / crushLimit()), w = Math.min(1, Math.sqrt(f)); c = [c[0] + (1 - c[0]) * w, c[1] * (1 - w), c[2] * (1 - w)]; }
       draw(pillMesh, M, c, 1, false, true); }
     if (singGL && sim.sing) draw(singGL, I, [0.95, 0.45, 0.85], 1, false);
+    { const Mx = m4.ident(); Mx[12] = -bo[0]; Mx[13] = -bo[1]; Mx[14] = -bo[2];   // imported parts live in bank (world) coordinates
+      for (const p of XP) if (p.mesh) { const c = p.col, col = [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16) / 255); if (p.alpha < 0.99) { gl.enable(gl.BLEND); gl.depthMask(false); draw(p.mesh, Mx, col, p.alpha, true); gl.depthMask(true); } else draw(p.mesh, Mx, col, 1, true); } gl.disable(gl.BLEND); }
     // dust specks: each falls straight down at a settling speed (~15 mm/s) from where it was shed, lands on the first
     // surface below (wall, plate, hopper, glass or belt -- FFx.dustLand) and sticks; specks on a belt ride with it
     if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx, now = sim.t, vs = 15e-3; let n = 0;
@@ -2157,6 +2311,19 @@ body.nonotes aside small{display:none}
     { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'block') draw(p.mesh, I, [0.78, 0.93, 1.0], 0.22, true); gl.depthMask(true); }   // 13 mm front block: clear glass
     // outer shell last (outermost), translucent
     if ((S.shellAlpha ?? 0.12) > 0.01) { gl.enable(gl.BLEND); gl.depthMask(false); for (const p of parts) if (p.role === 'shell') draw(p.mesh, I, [0.82, 0.76, 0.64], S.shellAlpha ?? 0.12, true); gl.depthMask(true); }
+    if (BANK.n > 1) drawIdle(bo);
+  }
+  // idle dispensers: frozen -- their parts, belts and the pills left in them, nothing simulated
+  function drawIdle(bo) {
+    const G = ghostMesh(); gl.disable(gl.BLEND);
+    for (let k = 0; k < BANK.n; k++) { if (k === BANK.cur) continue; const o = bankOff(k), M = m4.ident(); M[12] = o[0] - bo[0]; M[13] = o[1] - bo[1]; M[14] = o[2] - bo[2];
+      if (G) draw(G, M, ROLECOL.static, 1, true); draw(beltMesh[0], M, [1, 1, 1], 1, true); draw(beltMesh[1], M, [1, 1, 1], 1, true);
+      const u = BANK.units[k], sn = u && u.snap; if (sn && sn.p.length) { const pm = pillMeshFor(u.pill);
+        for (const q of sn.p) { const Mp = m4.fromQP([q[3], q[4], q[5], q[6]], [q[0] * 1e3 + M[12], q[1] * 1e3 + M[13], q[2] * 1e3 + M[14]]); draw(pm, Mp, hsv(q[7]), 1, false, true); } } }
+    gl.enable(gl.BLEND); gl.depthMask(false);
+    for (let k = 0; k < BANK.n; k++) { if (k === BANK.cur) continue; const o = bankOff(k), M = m4.ident(); M[12] = o[0] - bo[0]; M[13] = o[1] - bo[1]; M[14] = o[2] - bo[2];
+      for (const p of parts) { if (p.role === 'hopper' && S.hopperAlpha > 0.01) draw(p.mesh, M, ROLECOL.hopper, S.hopperAlpha, true); else if (p.role === 'shell' && (S.shellAlpha ?? 0.12) > 0.01) draw(p.mesh, M, [0.82, 0.76, 0.64], S.shellAlpha ?? 0.12, true); else if (p.role === 'block') draw(p.mesh, M, [0.78, 0.93, 1.0], 0.12, true); } }
+    gl.depthMask(true); gl.disable(gl.BLEND);
   }
 
   /* ---------------------------------------------------------------- statistics + charts */
@@ -2264,7 +2431,8 @@ body.nonotes aside small{display:none}
       const el = (now - wallPrev) / 1000; if (el > 0.4) { rtf = (sim.t - simPrev) / el; wallPrev = now; simPrev = sim.t; }
     }
     render();
-    if (now - lastUI > 250) { lastUI = now; updateReadouts(); }
+    if (BANK.n > 1) { bankStep(); settleStep(); }
+    if (now - lastUI > 250) { lastUI = now; updateReadouts(); dockUI(); xpReadouts(); if (BANK.n > 1 && now - (frame.bk || 0) > 1000) { frame.bk = now; bankLabels(); } }
   }
   function later(fn, ms) { pending = { at: performance.now() + ms, fn }; }
 
@@ -2277,7 +2445,7 @@ body.nonotes aside small{display:none}
   $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
 
   function syncUI() {
-    singUI();
+    singUI(); if (typeof bankUI === 'function' && $('bkTbl')) bankUI();
     if (S.vib) { $('vibF').value = S.vib.freq; $('vibFV').textContent = S.vib.freq; $('vibA').value = S.vib.accel_g; $('vibAV').textContent = S.vib.accel_g; $('vibDir').value = S.vib.axis; }
     S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; syncCtrlUI(); $('shellA').value = S.shellAlpha ?? 0.12; $('hopA').value = S.hopperAlpha; if (sim) $('crushN').value = S.crushN > 0 ? S.crushN : defaultCrush(sim.pillType.spec); $('loadCol').checked = !!S.loadCol; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
@@ -2291,7 +2459,7 @@ body.nonotes aside small{display:none}
   function hook(id, fn, live) { $(id).addEventListener('input', () => { fn($(id).value); const o = $(id + 'V'); if (o) o.textContent = $(id).value; }); }
   hook('foamType', v => { S.foamName = v; S.shore = FFx.FOAMS[v].S; for (const k in adv) delete adv[k]; applyFoam(); syncUI(); });
   hook('shore', v => { S.shore = +v; for (const k of ['E']) delete adv[k]; applyFoam(); });
-  hook('thick', v => { S.thick = +v; applyParams(); geoInfo(); });
+  hook('thick', v => { S.thick = +v; applyParams(); geoInfo(); if (typeof thickFlag === 'function') thickFlag(); });
   $('thick').addEventListener('change', () => { if (S.geom.top > 0 && S.hopFollow) applyGeom(); });
   function geoInfo() {
     const Lc = FFx.GEOM0.uTop + S.geom.top - S.geom.bot, loop = 2 * Lc + TAU * (5 + S.thick / 2);
@@ -2318,7 +2486,7 @@ body.nonotes aside small{display:none}
   $('geoReset').onclick = () => { S.geom = { bot: 0, top: 0, W: 8 }; syncUI(); applyGeom(); };
 
   /* ---- sensors + feed control (engine: newCtrl / ctrlStep) */
-  function CT_DEF() { return { mode: 'continuous', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 1, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 10, gate_wait_s: 3, wait_gate: true, snap_on_double: true, release_wait_s: 0.5, gate_open_on: 'jit', probe_check: true, stack_tol_pct: 30, min_gap_mm: 0, gate_lead_ms: 30, vib_s1: true, clear_max_s: 5, clear_retries: 10, gate_stroke_mm: 17, gate_speed: 0.10, n: 1, sel: 1,
+  function CT_DEF() { return { mode: 'feed', ramp_ms: 20, stop_delay_ms: 0, timeout_s: 15, gap_ms: 300, vib_with_motor: true, trigger: 1, backup: false, backup_mm: 2, backup_mm_s: 5, backlash_deg: 0.5, gate_close_ms: 10, gate_wait_s: 3, wait_gate: true, snap_on_double: true, release_wait_s: 0.5, gate_open_on: 'jit', probe_check: true, stack_tol_pct: 30, min_gap_mm: 0, gate_lead_ms: 30, vib_s1: true, clear_max_s: 5, clear_retries: 10, gate_stroke_mm: 17, gate_speed: 0.10, n: 1, sel: 1,
     sensors: [{ on: true, zone: 'probe', up_mm: 22 }, { on: true, zone: 'exit', below_mm: 0, count_on: 'clear' }, { on: true, zone: 'gate', pos_mm: 4 }].map(o => Object.assign({ side_mm: 0, axis: 'frontback', beam_mm: 1, response_ms: 0.5, min_block_ms: 1, min_clear_ms: 5, count_on: 'break' }, o)) }; }
   function ctS() { if (!S.ctrl || !Array.isArray(S.ctrl.sensors)) S.ctrl = CT_DEF(); if (S.ctrl.sensors.length && !S.ctrl.sensors[0].zone) { const o = S.ctrl.sensors[0]; S.ctrl.sensors = []; S.ctrl.trigger = 1; S.ctrl.sel = 1; S.ctrl._old = o; } const d = CT_DEF(); for (const k in d) if (S.ctrl[k] == null) S.ctrl[k] = d[k]; S.ctrl.sensors = d.sensors.map((x, i) => Object.assign(x, S.ctrl.sensors[i] || {})); if (S.ctrl._old) { for (const k of ['below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'count_on']) if (S.ctrl._old[k] != null) S.ctrl.sensors[1][k] = S.ctrl._old[k]; delete S.ctrl._old; }
     if (S.ctrl.sensors[0] && S.ctrl.sensors[0].zone === 'entry') { S.ctrl.sensors[0].zone = 'probe'; S.ctrl.sensors[0].up_mm = 22; delete S.ctrl.sensors[0].pos_mm; }   // S1 is now the in-conveyor length probe
@@ -2364,13 +2532,40 @@ body.nonotes aside small{display:none}
   $('ctVib').onchange = () => { ctS().vib_with_motor = $('ctVib').checked; applyCtrl(); };
   // backup only makes sense after a single pill: grey it out while the multi-pill count is above 1
   function backUI() { const multi = (ctS().n || 1) > 1; for (const id of ['ctBack', 'ctBackMm', 'ctBackV']) { const e = $(id); e.disabled = multi; const r = e.closest('.row'); if (r) { r.style.opacity = multi ? 0.4 : ''; r.title = multi ? 'Backup only runs after single-pill feeds — set How many pills to 1 to use it' : ''; } } }
-  const dispLbl = () => { const n = ctS().n; $('btnFeed').textContent = `▶ Dispense ${n} pill${n === 1 ? '' : 's'}`; };
+  const dispLbl = () => { const n = ctS().n; $('btnFeed').textContent = `▶ Dispense ${n} pill${n === 1 ? '' : 's'}`; $('dkNum').textContent = n; $('dkGo').textContent = `▶ DISPENSE ${n} PILL${n === 1 ? '' : 'S'}`; };
   $('ctN').onchange = $('ctN').oninput = () => { ctS().n = Math.max(1, Math.round(+$('ctN').value) || 1); backUI(); dispLbl(); };
   const stepN = d => { const n = Math.max(1, Math.min(1000, ctS().n + d)); ctS().n = n; $('ctN').value = n; backUI(); dispLbl(); };
   $('ctNm').onclick = () => stepN(-1); $('ctNp').onclick = () => stepN(1);
   // pressing a Feed button in Continuous mode switches to Feed on demand (belts stop, then the feed starts)
   function feedReq(n) { if (ctS().mode !== 'feed') { ctS().mode = 'feed'; applyCtrl(); syncCtrlUI(); } const C = sim.ctrl; if (C) { C.needs.push(n); C.queue++; } }
   $('btnFeed').onclick = () => feedReq(ctS().n);
+  /* ---- big action dock (always on screen): dispense N, stop, refill, nonstop, pause + a plain-language status line */
+  $('dkMinus').onclick = () => stepN(-1); $('dkPlus').onclick = () => stepN(1);
+  $('dkGo').onclick = () => { if (S.paused) $('btnPause').click(); const k = +$('dkUnit').value || 0; if (BANK.n > 1) bankCall(k, ctS().n); else feedReq(ctS().n); dockUI(); };
+  $('dkStop').onclick = () => { if (ctS().mode !== 'feed') { ctS().mode = 'feed'; applyCtrl(); syncCtrlUI(); } $('btnFeedStop').click(); dockUI(); };
+  $('dkRun').onclick = () => { const c = ctS(); c.mode = c.mode === 'feed' ? 'continuous' : 'feed'; applyCtrl(); syncCtrlUI(); dockUI(); };
+  $('dkLoad').onclick = () => { $('btnTrial').click(); dockUI(); };
+  $('dkPause').onclick = () => $('btnPause').click();
+  $('dkRejOk').onclick = () => { $('btnRejClr').click(); dockUI(); };
+  try { if (localStorage.getItem('ffHint') === '0') $('hint').style.display = 'none'; } catch (e) {}
+  $('hintX').onclick = () => { $('hint').style.display = 'none'; try { localStorage.setItem('ffHint', '0'); } catch (e) {} };
+  function dockUI() {
+    if (!sim) return; const C = sim.ctrl, c = ctS(), st = $('dkStat'), B = sim.bodies; let alive = 0; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) alive++;
+    const out = sim.stats.delivered || 0, tail = ` · ${out} dispensed · ${alive} in machine`;
+    $('dkRun').classList.toggle('on', c.mode !== 'feed'); $('dkRun').textContent = c.mode !== 'feed' ? '⇉ Running nonstop — tap to stop' : '⇉ Run nonstop';
+    $('dkPause').textContent = S.paused ? '▶ Resume' : '⏸ Pause';
+    const rej = C && C.reject; $('dkRej').style.display = rej ? '' : 'none'; if (rej) $('dkRejT').textContent = '⛔ LOT REJECTED — ' + (rej.why || '').slice(0, 70);
+    let t = '', cls = '';
+    if (S.paused) { t = 'Paused'; }
+    else if (!alive && c.mode === 'feed') { t = 'Hopper is empty — press ⟳ Refill hopper'; cls = 'err'; }
+    else if (rej) { t = 'Locked: lot rejected. Acknowledge to continue.'; cls = 'err'; }
+    else if (c.mode !== 'feed') { t = 'Belts running nonstop'; cls = 'busy'; }
+    else if (!C || C.state === 'idle') { t = C && C.queue ? 'Starting…' : (C && C.cur && C.cur.timeout ? 'Last dispense timed out — no pill came out. Ready.' : 'Ready — press DISPENSE'); cls = C && C.cur && C.cur.timeout ? 'err' : ''; }
+    else { const need = C.cur ? C.cur.need || 1 : 1, got = C.cur ? C.cur.n : 0;
+      t = C.state === 'clearing' ? 'Two pills caught together — backing them up into the hopper' : C.state === 'release' ? 'Releasing a held pill' : C.state === 'stopping' ? 'Pill out — stopping' : `Dispensing… ${got} of ${need}`; cls = 'busy'; }
+    if (BANK.n > 1) t = `#${BANK.cur + 1} ${BANK.units[BANK.cur].med}: ` + t + (BANK.q.length ? ` · ${BANK.q.length} call${BANK.q.length > 1 ? 's' : ''} waiting` : '');
+    st.textContent = t + tail; st.className = cls;
+  }
   $('btnRejClr').onclick = () => { const C = sim.ctrl; if (C) { C.reject = null; C.held = 0; C.snap = false; C.snapPend = false; } };
   $('btnFeedN').onclick = () => feedReq(ctS().n);
   $('btnFeedStop').onclick = () => { const C = sim.ctrl; if (!C) return; C.queue = 0; C.needs.length = 0; if (C.state !== 'idle') { C.state = 'idle'; if (C.cur) { C.cur.tStop = sim.t; C.cur.aborted = true; } C.tNext = sim.t; } };
@@ -2446,7 +2641,7 @@ body.nonotes aside small{display:none}
   $('btnFill').onclick = () => { sim.addPills(S.count); };
   $('btnClear').onclick = () => { sim.reset(false); };
   $('btnWear').onclick = () => { sim.resetFoam(); };
-  $('btnPause').onclick = () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? '▶ Resume' : '⏸ Pause'; };
+  $('btnPause').onclick = () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? '▶ Resume' : '⏸ Pause'; if (typeof dockUI === 'function') dockUI(); };
   $('btnTrial').onclick = () => { sim.reset(false); sim.addPills(S.count); };
   document.querySelectorAll('[data-cam]').forEach(b => b.onclick = () => setPreset(b.dataset.cam));
   $('secOn').onchange = e => { S.sectionOn = e.target.checked; }; $('secX').oninput = e => { S.sectionX = +e.target.value; $('secXV').textContent = e.target.value; };
@@ -2454,10 +2649,10 @@ body.nonotes aside small{display:none}
   $('camBump').onchange = e => { sim.P.camBump = e.target.checked ? 1 : 0; };
   $('dtSel').onchange = e => { S.dtMode = +e.target.value; applyParams(); };
   $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dispense_log.csv'; a.click(); };
-  function setupObj() { return { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null, hopper: hopRaw ? { name: hopRaw.name, v: b64enc(hopRaw.v), t: b64enc(hopRaw.t), offset: ['hopDx', 'hopDy', 'hopDz'].map(id => +$(id).value || 0) } : null }; }
-  $('btnSave').onclick = () => { const o = setupObj(); const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); idbPut(o); };
+  function setupObj() { return { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null, hopper: hopRaw ? { name: hopRaw.name, v: b64enc(hopRaw.v), t: b64enc(hopRaw.t), offset: ['hopDx', 'hopDy', 'hopDz'].map(id => +$(id).value || 0) } : null, parts: XP.map(p => ({ name: p.name, unit: p.unit, pos: p.pos, rot: p.rot, sc: p.sc, mu: p.mu, rest: p.rest, solid: p.solid, count: p.count, col: p.col, alpha: p.alpha, v: b64enc(p.raw.v), t: b64enc(p.raw.t) })), model: MD.applied ? MD.rows.map(r => ({ name: r.name, role: r.role, v: b64enc(r.v), t: b64enc(r.t) })) : null }; }
+  $('btnSave').onclick = () => { S.bank = bankSave(); const o = setupObj(); const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); idbPut(o); };
   $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); applySetup(o); e.target.value = ''; };
-  function applySetup(o) { if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {});
+  function applySetup(o) { if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {}); if (S.bank) bankLoad(S.bank);
     if (o.texture) { TEX.cells.set(o.texture.cells); TEX.ridge = o.texture.ridge; TEX.groove = o.texture.groove; TEX.len = o.texture.len; for (const [id, k] of [['texRidge', 'ridge'], ['texGroove', 'groove'], ['texLen', 'len']]) { $(id).value = TEX[k]; $(id + 'V').textContent = TEX[k]; } }
     if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); $('camInfo').textContent = 'Cam profile from setup file.'; }
     else if (CAD.cam.custom) { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; $('camInfo').textContent = 'Original CAD cam.'; }
@@ -2466,6 +2661,9 @@ body.nonotes aside small{display:none}
       ['hopDx', 'hopDy', 'hopDz'].forEach((id, k) => $(id).value = (o.hopper.offset || [0, 0, 0])[k]);
       applyHopper(true);
     } else if (hopRaw) { hopRaw = null; CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat(ORIG.parts.filter(p => p.role === 'hopper')); delete CAD.spawn; $('hopInfo').textContent = 'Original container.'; ['hopDx', 'hopDy', 'hopDz'].forEach(id => $(id).value = 0); }
+    if (o.model && o.model.length) { MD.rows = o.model.map(q => { const v = b64(q.v, Float32Array); return { name: q.name, role: q.role, v, t: b64(q.t, Uint32Array), bb: bbOf(v) }; }); mdTable(); mdApply(); Object.assign(S, o.S); }
+    else if (MD.applied) mdOriginal();
+    XP.length = 0; for (const q of o.parts || []) { const p = Object.assign({}, q, { raw: { v: b64(q.v, Float32Array), t: b64(q.t, Uint32Array) } }); delete p.v; delete p.t; XP.push(p); xpBuild(p); } xpCur = XP.length - 1; xpUI();
     applyTex(); rebuildGLParts(); rebuildGlass();   // texture first: a raised-idler slot is cut to clear the ridges
     newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); }
 
@@ -2573,19 +2771,30 @@ body.nonotes aside small{display:none}
         let vv, tt = t0;
         if (p.role === 'plate' || p.role === 'hopper' || p.role === 'shell') { const sp = FFx.shellPart(p.role, v0, t0, CAD, simGeom(), S.hopFollow, S.thick, texHmm(), S.throat, p.id === '021_00'); vv = sp.v; tt = sp.t; }
         else vv = xformVerts(p, v0);
-        c = { key, mesh: mkMesh(vv, tt, null, null, false) }; meshCache.set(p, c);
+        c = { key, mesh: mkMesh(vv, tt, null, null, false), vv, tt }; meshCache.set(p, c);
       }
       const info = p._info || { idler: -1, kind: null };
       parts.push({ role: p.role, rot: p.rot, mesh: c.mesh, id: p.id, idler: info.idler, kind: info.kind });
     }
     if (CAD.cam.custom && camGen) for (const g of camGen) parts.push(g);
+    ghostDirty = true;
     if (throatGL) { for (const b of [throatGL.pb, throatGL.nb, throatGL.cb, throatGL.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(throatGL.vao); throatGL = null; }
     if (S.throat && S.throat.on) {
       const hop = CAD.parts.find(p => p.role === 'hopper'), g = FFx.throatMesh(CAD, simGeom(), S.throat, !!hop && hop.id === '021_00', S.thick, texHmm());
       if (g && g.t.length) { throatGL = mkMesh(g.v, g.t, null, null, false); parts.push({ role: 'throat', rot: null, mesh: throatGL, id: 'throat' }); }
     }
   }
-  let throatGL = null, dustGL = null, beamGL = null;
+  let throatGL = null, dustGL = null, beamGL = null, ghostGL = null, ghostDirty = true;
+  // idle dispensers are drawn as one merged mesh of every opaque part (one draw call each) plus their own hopper / shell
+  function ghostMesh() {
+    if (!ghostDirty && ghostGL) return ghostGL; ghostDirty = false;
+    if (ghostGL) { for (const b of [ghostGL.pb, ghostGL.nb, ghostGL.cb, ghostGL.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(ghostGL.vao); ghostGL = null; }
+    const L = []; let nv = 0, nt = 0;
+    for (const p of CAD.parts) { if (['hopper', 'shell', 'block', 'throat'].includes(p.role)) continue; const c = meshCache.get(p); if (!c || !c.vv) continue; L.push(c); nv += c.vv.length; nt += c.tt.length; }
+    if (!nt) return null; const v = new Float32Array(nv), t = new Uint32Array(nt); let ov = 0, ot = 0;
+    for (const c of L) { v.set(c.vv, ov); for (let i = 0; i < c.tt.length; i++) t[ot + i] = c.tt[i] + ov / 3; ov += c.vv.length; ot += c.tt.length; }
+    ghostGL = mkMesh(v, t, null, null, false); return ghostGL;
+  }
   rebuildGLParts(); rebuildGlass();
   function parseSTL(buf) {
     const dv = new DataView(buf), n = buf.byteLength >= 84 ? dv.getUint32(80, true) : 0;
@@ -2611,6 +2820,7 @@ body.nonotes aside small{display:none}
   async function readMesh(file) {
     const ext = file.name.split('.').pop().toLowerCase();
     if (ext === 'obj') return parseOBJ(await file.text());
+    if (ext === 'step' || ext === 'stp') return mergeMeshes(await readStep(file));
     return parseSTL(await file.arrayBuffer());
   }
   const toLocal = (X, Y, Z) => { const d = [X - OM[0], Y - OM[1], Z - OM[2]]; return [d[0] * EX[0] + d[1] * EX[1] + d[2] * EX[2], d[0] * EU[0] + d[1] * EU[1] + d[2] * EU[2], d[0] * EV[0] + d[1] * EV[1] + d[2] * EV[2]]; };
@@ -2791,6 +3001,291 @@ body.nonotes aside small{display:none}
   $('dustTack').onchange = () => { S.dustTack = $('dustTack').checked; if (sim) sim.P.dustTack = S.dustTack ? 1 : 0; };
   hook('dustStatic', v => { S.dustStatic = +v; if (sim) sim.P.dustStatic = S.dustStatic; });
   function singUI() { const g = S.sing; $('sgOn').checked = !!g.on; $('sgAxis').value = g.axis; for (const [id, k] of [['sgU', 'u_mm'], ['sgX', 'x_mm'], ['sgV', 'v_mm'], ['sgLen', 'len_mm'], ['sgR', 'r_mm'], ['sgMu', 'mu']]) { $(id).value = g[k]; $(id + 'V').textContent = g[k]; } $('dustTack').checked = !!S.dustTack; $('dustStatic').value = S.dustStatic; $('dustStaticV').textContent = S.dustStatic; }
+  /* ================================================================ dispenser bank */
+  // per dispenser: medication label, pill, load size, and (while idle) a snapshot of the pills still inside it
+  const newUnit = k => ({ med: `Medication ${k + 1}`, pill: JSON.parse(JSON.stringify(S.pill)), count: S.count, snap: null, out: 0 });
+  function pillsLeft(k) { if (k === BANK.cur && sim) { const B = sim.bodies; let n = 0; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) n++; return n; } const u = BANK.units[k]; return u.snap ? u.snap.p.length : u.count; }
+  function snapPills(sm) {   // pills still in the dispenser (not yet out): positions + orientation + colour, at rest
+    const B = sm.bodies, p = []; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) p.push([B.px[i], B.py[i], B.pz[i], B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3], B.hue[i]]); return { p }; }
+  function restorePills(sm, sn) { sm.reset(false); const B = sm.bodies, T = sm.pillType;
+    for (const q of sn.p) { if (B.n >= B.cap) break; const k = B.n++; B.alive[k] = 1; B.type[k] = T; B.id[k] = B.seq++; B.px[k] = q[0]; B.py[k] = q[1]; B.pz[k] = q[2];
+      for (let a = 0; a < 4; a++) B.q[k * 4 + a] = q[3 + a]; B.vx[k] = B.vy[k] = B.vz[k] = B.wx[k] = B.wy[k] = B.wz[k] = 0; B.exitT[k] = -1; B.hue[k] = q[7]; } }
+  // pills already dispensed and still moving / lying downstream (in a manifold or collector) carry over into the next
+  // dispenser's simulation with their full state, shifted into its coordinates
+  function takeDownstream(sm, o) { const B = sm.bodies, out = []; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] >= 0) out.push({ T: B.type[i], hue: B.hue[i], s: [B.px[i] + o[0], B.py[i] + o[1], B.pz[i] + o[2], B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3], B.vx[i], B.vy[i], B.vz[i], B.wx[i], B.wy[i], B.wz[i]] }); return out; }
+  function putDownstream(sm, list, o) { const B = sm.bodies; for (const d of list) { if (B.n >= B.cap) break; const k = B.n++, q = d.s; B.alive[k] = 1; B.type[k] = d.T; B.id[k] = B.seq++; B.px[k] = q[0] - o[0]; B.py[k] = q[1] - o[1]; B.pz[k] = q[2] - o[2];
+      for (let a = 0; a < 4; a++) B.q[k * 4 + a] = q[3 + a]; B.vx[k] = q[7]; B.vy[k] = q[8]; B.vz[k] = q[9]; B.wx[k] = q[10]; B.wy[k] = q[11]; B.wz[k] = q[12]; B.exitT[k] = 0; B.hue[k] = d.hue; if (B.hole) B.hole[k] = 1; } }
+  function activate(k) {
+    if (k === BANK.cur || k < 0 || k >= BANK.n) return;
+    const old = BANK.units[BANK.cur], o0 = bankOff(BANK.cur), o1 = bankOff(k);
+    old.snap = snapPills(sim); old.pill = JSON.parse(JSON.stringify(S.pill)); old.count = S.count; old.out += sim.stats.delivered || 0;
+    const down = takeDownstream(sim, o0), wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) };
+    BANK.cur = k; const u = BANK.units[k]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count;
+    for (let a = 0; a < 3; a++) cam.t[a] += o1[a] - o0[a];   // camera follows the dispenser that is now running
+    for (const p of XP) p.grid = null;
+    newSim(); applyFoam(); sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i]));
+    if (u.snap) restorePills(sim, u.snap); putDownstream(sim, down, o1); u.snap = null;
+    syncUI(); bankUI();
+  }
+  // a call: queued; served one at a time, each once the running dispenser has finished (controller idle, gate shut)
+  function bankCall(k, n) { BANK.q.push({ k, n }); }
+  function bankStep() {
+    if (!BANK.q.length || !sim) return; const C = sim.ctrl;
+    const busy = C && (C.state !== 'idle' || C.queue > 0 || C.needs.length > 0 || C.awaitClear || C.awaitS3 != null || C.closeAt != null || (sim.gate && sim.gate.ang > (sim.gate.a0 || 0) + 1e-6));
+    if (busy) return; const c = BANK.q.shift(); activate(c.k); feedReq(c.n);
+  }
+  function setBankN(n) { n = Math.max(1, Math.min(32, Math.round(n) || 1));
+    while (BANK.units.length < n) BANK.units.push(newUnit(BANK.units.length));
+    if (BANK.cur >= n) activate(0); BANK.n = n; BANK.q = BANK.q.filter(c => c.k < n); S.bank = bankSave(); bankUI(); fitAll(); }
+  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, BANK.n).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, out: u.out, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap })) }; }
+  function bankLoad(b) { if (!b) return; BANK.cols = b.cols || 8; BANK.pitchX = b.pitchX || 50; BANK.pitchY = b.pitchY || 110; BANK.units = (b.units || []).map((u, k) => Object.assign(newUnit(k), u)); BANK.n = Math.max(1, Math.min(32, b.n || BANK.units.length || 1)); while (BANK.units.length < BANK.n) BANK.units.push(newUnit(BANK.units.length));
+    BANK.cur = Math.min(b.cur || 0, BANK.n - 1); const u = BANK.units[BANK.cur]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; }
+  const pillLabel = p => { const sh = { tablet: 'tablet', capsule: 'capsule', ellipsoid: 'softgel', sphere: 'bead' }[p.shape] || p.shape; return p.shape === 'tablet' || p.shape === 'sphere' ? `${sh} ${p.W} mm` : `${sh} ${p.L}×${p.W} mm`; };
+  let bankSel = 0;
+  function bankLabels() { const ds = $('dkUnit'); for (const o of ds.options) { const k = +o.value; o.textContent = `#${k + 1} · ${BANK.units[k].med} · ${pillLabel(k === BANK.cur ? S.pill : BANK.units[k].pill)} · ${pillsLeft(k)} left${k === BANK.cur ? ' ◀ running' : ''}`; }
+    for (const tr of $('bkTbl').querySelectorAll('tr[data-k]')) { const k = +tr.dataset.k; tr.cells[3].textContent = pillsLeft(k); tr.cells[0].textContent = (k + 1) + (k === BANK.cur ? ' ▶' : ''); tr.style.fontWeight = k === BANK.cur ? '700' : ''; } }
+  function bankUI() {
+    if (!BANK.units.length) BANK.units.push(newUnit(0)); BANK.units[BANK.cur].pill = S.pill; BANK.units[BANK.cur].count = S.count;
+    $('bkN').value = BANK.n; $('bkCols').value = BANK.cols; $('bkPx').value = BANK.pitchX; $('bkPy').value = BANK.pitchY;
+    const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const lab = k => `#${k + 1} · ${BANK.units[k].med} · ${pillLabel(k === BANK.cur ? S.pill : BANK.units[k].pill)} · ${pillsLeft(k)} left`;
+    const opts = [...Array(BANK.n).keys()].map(k => `<option value="${k}">${esc(lab(k))}${k === BANK.cur ? ' ◀ running' : ''}</option>`).join('');
+    const ds = $('dkUnit'); const sv = ds.value; ds.innerHTML = opts; ds.value = sv !== '' && +sv < BANK.n ? sv : String(BANK.cur); $('dkUnitW').style.display = BANK.n > 1 ? '' : 'none';
+    let h = '<tr style="position:sticky;top:0;background:#1b212b"><th>#</th><th style="text-align:left">Medication</th><th>Pill</th><th>Left</th><th></th></tr>';
+    for (let k = 0; k < BANK.n; k++) { const u = BANK.units[k]; h += `<tr data-k="${k}" style="border-top:1px solid #2a303b;${k === bankSel ? 'background:#1f2b40;' : ''}${k === BANK.cur ? 'font-weight:700' : ''}"><td style="text-align:center">${k + 1}${k === BANK.cur ? ' ▶' : ''}</td><td style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.med)}</td><td style="white-space:nowrap">${esc(pillLabel(k === BANK.cur ? S.pill : u.pill))}</td><td style="text-align:center">${pillsLeft(k)}</td><td><button class="bkGo" title="dispense the number of pills set in the green bar from this dispenser">Call</button></td></tr>`; }
+    $('bkTbl').innerHTML = h;
+    for (const tr of $('bkTbl').querySelectorAll('tr[data-k]')) { const k = +tr.dataset.k; tr.onclick = e => { if (e.target.classList.contains('bkGo')) return; bankSel = k; bankEd(); bankUI(); }; tr.querySelector('.bkGo').onclick = () => { bankCall(k, ctS().n); $('dkUnit').value = String(k); }; }
+    bankEd();
+  }
+  function bankEd() { if (bankSel >= BANK.n) bankSel = 0; const u = BANK.units[bankSel]; $('bkSelN').textContent = `#${bankSel + 1}`; $('bkMed').value = u.med; $('bkCount').value = bankSel === BANK.cur ? S.count : u.count; $('bkPill').value = ''; }
+  $('bkN').onchange = () => setBankN(+$('bkN').value);
+  for (const [id, k] of [['bkCols', 'cols'], ['bkPx', 'pitchX'], ['bkPy', 'pitchY']]) $(id).onchange = () => { BANK[k] = Math.max(id === 'bkCols' ? 1 : 10, +$(id).value || BANK[k]); fitAll(); };
+  $('bkMed').onchange = () => { BANK.units[bankSel].med = $('bkMed').value || `Medication ${bankSel + 1}`; bankUI(); };
+  $('bkPill').innerHTML = '<option value="">change pill…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
+  $('bkPill').onchange = () => { const p = PILLS[$('bkPill').value]; if (!p) return; const sp = Object.assign({ L: p.W, T: p.W, edge: 0.8, mat: 'pressed' }, p); if (p.shape === 'tablet') sp.L = p.W;
+    if (bankSel === BANK.cur) { delete S.pill.fri; delete S.pill.tack; Object.assign(S.pill, sp); syncUI(); later(rebuildPills, 50); } else { BANK.units[bankSel].pill = sp; BANK.units[bankSel].snap = null; } bankUI(); };
+  $('bkCount').onchange = () => { const n = Math.max(1, Math.min(150, +$('bkCount').value || 10)); if (bankSel === BANK.cur) { S.count = n; syncUI(); } else { BANK.units[bankSel].count = n; BANK.units[bankSel].snap = null; } bankUI(); };
+  $('bkRefill').onclick = () => { if (bankSel === BANK.cur) $('btnTrial').click(); else BANK.units[bankSel].snap = null; bankUI(); };
+  // idle dispensers that were never run start full: settle their load once in a throw-away sim (a little each frame)
+  let settleJob = null;
+  function settleStep() {
+    if (!settleJob) { const k = BANK.units.findIndex((u, i) => i < BANK.n && i !== BANK.cur && !u.snap); if (k < 0) return;
+      const u = BANK.units[k], sm = FFx.createSim(CAD, { pill: u.pill, foam: S.foamName, shore: S.shore, glass: S.glass, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, noFoam: false, params: { rpm: 0, thickness: S.thick * 1e-3, dt: S.dtMode } }); sm.P.rpm = 0; sm.addPills(u.count); settleJob = { k, sm }; }
+    const J = settleJob, t0 = performance.now(); while (performance.now() - t0 < 4 && J.sm.t < 1.2) J.sm.step(20);
+    if (J.sm.t >= 1.2) { const u = BANK.units[J.k]; if (u && !u.snap && J.k !== BANK.cur) u.snap = snapPills(J.sm); settleJob = null; bankUI(); }
+  }
+  /* ---- imported parts: file -> transform (units, move, rotate about centre, scale) -> GL mesh + collision tris */
+  const XP = []; let xpCur = -1, xpT = null;
+  function xpBuild(p) {
+    const v = p.raw.v, t = p.raw.t, u = p.unit, n = t.length / 3; let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < v.length; i += 3) for (let a = 0; a < 3; a++) { const w = v[i + a] * u; if (w < mn[a]) mn[a] = w; if (w > mx[a]) mx[a] = w; }
+    const c = [0, 1, 2].map(a => (mn[a] + mx[a]) / 2), d2r = PI / 180, [ax, ay, az] = p.rot.map(x => x * d2r);
+    const cx = Math.cos(ax), sx = Math.sin(ax), cy = Math.cos(ay), sy = Math.sin(ay), cz = Math.cos(az), sz = Math.sin(az);
+    const R = [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx, sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx, -sy, cy * sx, cy * cx];   // Rz Ry Rx
+    const W = new Float32Array(v.length); let wmn = [1e9, 1e9, 1e9], wmx = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < v.length; i += 3) { const q = [0, 1, 2].map(a => (v[i + a] * u - c[a]) * p.sc);
+      for (let a = 0; a < 3; a++) { const w = R[a * 3] * q[0] + R[a * 3 + 1] * q[1] + R[a * 3 + 2] * q[2] + c[a] + p.pos[a]; W[i + a] = w; if (w < wmn[a]) wmn[a] = w; if (w > wmx[a]) wmx[a] = w; } }
+    p.bb = [wmn, wmx]; p.c0 = c;
+    const pos = new Float32Array(n * 9), nrm = new Float32Array(n * 9), idx = new Uint32Array(n * 3), tris = new Float64Array(n * 9);
+    for (let f = 0; f < n; f++) { const A = t[f * 3] * 3, Bv = t[f * 3 + 1] * 3, Cv = t[f * 3 + 2] * 3;
+      const e1 = [W[Bv] - W[A], W[Bv + 1] - W[A + 1], W[Bv + 2] - W[A + 2]], e2 = [W[Cv] - W[A], W[Cv + 1] - W[A + 1], W[Cv + 2] - W[A + 2]];
+      let nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2], nz = e1[0] * e2[1] - e1[1] * e2[0]; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+      for (let k = 0; k < 3; k++) { const s0 = [A, Bv, Cv][k], o = f * 9 + k * 3; for (let a = 0; a < 3; a++) { pos[o + a] = W[s0 + a]; tris[o + a] = W[s0 + a] * 1e-3; } nrm[o] = nx; nrm[o + 1] = ny; nrm[o + 2] = nz; idx[f * 3 + k] = f * 3 + k; } }
+    p.mesh = mkMesh(pos, idx, nrm, null, false); p.tris = tris; p.grid = null;
+  }
+  function xpApply(rebuild) {
+    if (rebuild) for (const p of XP) if (!p.mesh) xpBuild(p);
+    if (!sim) return; clearTimeout(xpT);
+    // the collision grid is rebuilt a moment after the last change so dragging a slider stays smooth
+    xpT = setTimeout(() => { if (!sim) return; const bo = bankOff(BANK.cur), sh = t => { if (!bo[0] && !bo[1] && !bo[2]) return t; const o = new Float64Array(t.length); for (let i = 0; i < t.length; i += 3) { o[i] = t[i] - bo[0] * 1e-3; o[i + 1] = t[i + 1] - bo[1] * 1e-3; o[i + 2] = t[i + 2] - bo[2] * 1e-3; } return o; };
+      sim.setExtraParts(XP.map(p => ({ name: p.name, tris: sh(p.tris), grid: p.grid, mu: p.mu, rest: p.rest, solid: p.solid, count: p.count })));
+      if (sim.xp) sim.xp.forEach((q, k) => { XP[k].grid = q.grid; }); }, 60);
+  }
+  function xpPhys() { if (sim && sim.xp) sim.xp.forEach((q, k) => { const p = XP[k]; if (!p) return; q.mu = p.mu; q.rest = p.rest; q.solid = p.solid; q.count = p.count; }); }
+  const XPN = [['xpX', 0], ['xpY', 1], ['xpZ', 2]], XPR = [['xpRx', 0], ['xpRy', 1], ['xpRz', 2]];
+  function xpUI() {
+    const sel = $('xpSel'); sel.innerHTML = XP.length ? XP.map((p, k) => `<option value="${k}">${p.name.replace(/</g, '&lt;')}</option>`).join('') : '<option value="">— no parts yet —</option>'; sel.dataset.n = XP.length;
+    if (xpCur >= XP.length) xpCur = XP.length - 1; sel.value = xpCur >= 0 ? String(xpCur) : ''; $('xpEd').style.display = xpCur >= 0 ? '' : 'none'; if (xpCur < 0) return;
+    const p = XP[xpCur]; $('xpName').value = p.name; $('xpUnit').value = String(p.unit);
+    for (const [id, a] of XPN) { $(id).value = p.pos[a]; $(id + 'n').value = p.pos[a]; } for (const [id, a] of XPR) { $(id).value = p.rot[a]; $(id + 'n').value = p.rot[a]; }
+    $('xpSc').value = p.sc; $('xpScn').value = p.sc; $('xpMu').value = p.mu; $('xpMuV').textContent = p.mu; $('xpRest').value = p.rest; $('xpRestV').textContent = p.rest;
+    $('xpSolid').checked = p.solid; $('xpCount').checked = p.count; $('xpCol').value = p.col; $('xpA').value = p.alpha; $('xpMat').value = '';
+    xpSize();
+  }
+  function xpSize() { const p = XP[xpCur]; if (!p || !p.bb) return; const [a, b] = p.bb, f = x => x.toFixed(1); $('r_xpSize').textContent = `${f(b[0] - a[0])} × ${f(b[1] - a[1])} × ${f(b[2] - a[2])} mm · Z ${f(a[2])} to ${f(b[2])} · ${p.raw.t.length / 3} triangles`; }
+  function xpEdit(fn, phys) { const p = XP[xpCur]; if (!p) return; fn(p); if (phys) { xpPhys(); return; } xpBuild(p); xpApply(); xpSize(); }
+  for (const [id, a] of XPN) { $(id).oninput = () => xpEdit(p => { p.pos[a] = +$(id).value; $(id + 'n').value = p.pos[a]; }); $(id + 'n').onchange = () => xpEdit(p => { p.pos[a] = +$(id + 'n').value || 0; $(id).value = p.pos[a]; }); }
+  for (const [id, a] of XPR) { $(id).oninput = () => xpEdit(p => { p.rot[a] = +$(id).value; $(id + 'n').value = p.rot[a]; }); $(id + 'n').onchange = () => xpEdit(p => { p.rot[a] = +$(id + 'n').value || 0; $(id).value = p.rot[a]; }); }
+  $('xpSc').oninput = () => xpEdit(p => { p.sc = +$('xpSc').value; $('xpScn').value = p.sc; }); $('xpScn').onchange = () => xpEdit(p => { p.sc = Math.max(0.01, +$('xpScn').value || 1); $('xpSc').value = p.sc; });
+  $('xpUnit').onchange = () => xpEdit(p => { p.unit = +$('xpUnit').value; });
+  $('xpName').onchange = () => { const p = XP[xpCur]; if (p) { p.name = $('xpName').value || p.name; xpUI(); } };
+  $('xpMu').oninput = () => xpEdit(p => { p.mu = +$('xpMu').value; $('xpMuV').textContent = p.mu; $('xpMat').value = ''; }, true);
+  $('xpRest').oninput = () => xpEdit(p => { p.rest = +$('xpRest').value; $('xpRestV').textContent = p.rest; $('xpMat').value = ''; }, true);
+  $('xpMat').onchange = () => { const v = $('xpMat').value; if (!v) return; const [mu, e] = v.split(',').map(Number); xpEdit(p => { p.mu = mu; p.rest = e; $('xpMu').value = mu; $('xpMuV').textContent = mu; $('xpRest').value = e; $('xpRestV').textContent = e; }, true); };
+  $('xpSolid').onchange = () => xpEdit(p => { p.solid = $('xpSolid').checked; }, true);
+  $('xpCount').onchange = () => xpEdit(p => { p.count = $('xpCount').checked; }, true);
+  $('xpCol').oninput = () => { const p = XP[xpCur]; if (p) p.col = $('xpCol').value; }; $('xpA').oninput = () => { const p = XP[xpCur]; if (p) p.alpha = +$('xpA').value; };
+  $('xpSel').onchange = () => { xpCur = $('xpSel').value === '' ? -1 : +$('xpSel').value; xpUI(); };
+  $('xpPlace').onclick = () => { xpEdit(p => { p.pos = [0, 0, 0]; xpBuild(p); const [a, b] = p.bb, ox = sim.O[0] * 1e3 + sim.XB * 500, oy = 20, oz = -3;
+    p.pos = [ox - (a[0] + b[0]) / 2, oy - (a[1] + b[1]) / 2, oz - b[2]].map(x => Math.round(x * 2) / 2); xpUI(); }); fitAll(); };
+  $('xpZero').onclick = () => xpEdit(p => { p.pos = [0, 0, 0]; p.rot = [0, 0, 0]; p.sc = 1; xpUI(); });
+  $('xpDel').onclick = () => { if (xpCur < 0) return; XP.splice(xpCur, 1); xpCur = Math.min(xpCur, XP.length - 1); xpUI(); xpApply(); };
+  $('xpDup').onclick = () => { const p = XP[xpCur]; if (!p) return; const q = Object.assign({}, p, { name: p.name + ' copy', pos: p.pos.slice(), rot: p.rot.slice(), mesh: null, grid: null, tris: null }); q.pos[0] += 10; XP.push(q); xpCur = XP.length - 1; xpBuild(q); xpUI(); xpApply(); };
+  $('xpFile').onchange = async e => { for (const f of e.target.files) { try { const m = await readMesh(f);
+        const p = { name: f.name.replace(/\.[^.]+$/, ''), raw: m, unit: 1, pos: [0, 0, 0], rot: [0, 0, 0], sc: 1, mu: 0.35, rest: 0.45, solid: true, count: false, col: '#9ad0ff', alpha: 0.6 };
+        // a file in metres (tiny) or inches is a common slip: guess from the size
+        let mx = 0; for (let i = 0; i < m.v.length; i++) mx = Math.max(mx, Math.abs(m.v[i])); if (mx > 0 && mx < 1) p.unit = 1000;
+        XP.push(p); xpCur = XP.length - 1; xpBuild(p); $('xpInfo').textContent = `Imported ${f.name}: ${m.t.length / 3} triangles.` + (p.unit === 1000 ? ' It looked like metres, so units are set to metres.' : '') + ' Use “Put under the outlet” to drop it in place.';
+      } catch (err) { $('xpInfo').textContent = `${f.name}: ${err.message}`; } }
+    e.target.value = ''; xpUI(); xpApply(); fitAll(); };
+  function xpReadouts() { if (xpCur < 0 || !sim || !sim.xp || !sim.xp[xpCur]) { $('r_xpHits').textContent = '—'; return; } const q = sim.xp[xpCur]; $('r_xpHits').textContent = q.count ? `${q.seen ? q.seen.size : 0} different pills · peak push ${fmt(q.Fpk || 0, 2)} N` : 'tick “Count pills reaching it”'; }
+  /* ================================================================ machine model: STEP assembly import, roles, conveyor finder */
+  const MD = { rows: [], applied: false, repRow: -1 };
+  ORIG.frame = JSON.parse(JSON.stringify(CAD.frame)); ORIG.spawn = CAD.spawn ? JSON.parse(JSON.stringify(CAD.spawn)) : null;
+  let occtP = null;
+  // OpenCascade (WASM, ~7.6 MB, jsDelivr CDN) runs in a background worker so the page keeps animating while a big
+  // assembly is meshed (~25 s for a 35 MB file)
+  const OCCT_BASE = 'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/';
+  function loadOCCT() {
+    if (occtP) return occtP;
+    const src = `importScripts('${OCCT_BASE}occt-import-js.js');
+      let ready = occtimportjs({ locateFile: f => '${OCCT_BASE}' + f });
+      onmessage = async e => { try { const o = await ready, r = o.ReadStepFile(new Uint8Array(e.data), { linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.001, angularDeflection: 0.5 });
+        if (!r || !r.success) { postMessage({ err: 'the STEP reader could not read this file' }); return; }
+        const ms = r.meshes.map(m => ({ name: m.name || '', v: new Float32Array(m.attributes.position.array), t: new Uint32Array(m.index.array) }));
+        postMessage({ ms }, ms.flatMap(m => [m.v.buffer, m.t.buffer])); } catch (err) { postMessage({ err: String(err && err.message || err) }); } };`;
+    occtP = Promise.resolve({ read: buf => new Promise((res, rej) => { const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      w.onmessage = e => { w.terminate(); if (e.data.err) rej(new Error(e.data.err)); else res(e.data.ms); };
+      w.onerror = e => { w.terminate(); occtP = null; rej(new Error('could not start the STEP reader (it downloads ~8 MB the first time and needs an internet connection)')); };
+      w.postMessage(buf.buffer, [buf.buffer]); }) });
+    return occtP;
+  }
+  // names of the solids in the order OpenCascade meshes them: STEP shape representations in file order, their items in order
+  function stepSolidNames(txt) {
+    const nm = new Map(); for (const m of txt.matchAll(/#(\d+)\s*=\s*(?:MANIFOLD_SOLID_BREP|BREP_WITH_VOIDS|SHELL_BASED_SURFACE_MODEL|FACETED_BREP)\s*\(\s*'([^']*)'/g)) nm.set(m[1], m[2]);
+    const out = []; for (const m of txt.matchAll(/=\s*(?:ADVANCED_BREP_SHAPE_REPRESENTATION|MANIFOLD_SURFACE_SHAPE_REPRESENTATION|FACETED_BREP_SHAPE_REPRESENTATION)\s*\(\s*'[^']*'\s*,\s*\(([^)]*)\)/g))
+      for (const it of m[1].split(',')) { const id = it.trim().replace('#', ''); if (nm.has(id)) out.push(nm.get(id)); }
+    return out;
+  }
+  async function readStep(file) {
+    const buf = new Uint8Array(await file.arrayBuffer()); let names = []; try { names = stepSolidNames(new TextDecoder('latin1').decode(buf)); } catch (e) {}
+    const o = await loadOCCT(), r = { meshes: (await o.read(buf)).map(m => ({ name: m.name, attributes: { position: { array: m.v } }, index: { array: m.t } })) };
+    const generic = n => !n || /^(SOLID|COMPOUND|SHELL|COMPSOLID|Open CASCADE STEP translator.*)$/i.test(n);
+    return r.meshes.map((m, k) => ({ name: !generic(m.name) ? m.name : (names.length === r.meshes.length && names[k] ? names[k] : `part ${k + 1}`),
+      v: new Float32Array(m.attributes.position.array), t: new Uint32Array(m.index.array) }));
+  }
+  function mergeMeshes(list) { let nv = 0, nt = 0; for (const m of list) { nv += m.v.length; nt += m.t.length; } const v = new Float32Array(nv), t = new Uint32Array(nt); let ov = 0, ot = 0;
+    for (const m of list) { v.set(m.v, ov); for (let i = 0; i < m.t.length; i++) t[ot + i] = m.t[i] + ov / 3; ov += m.v.length; ot += m.t.length; } return { v, t }; }
+  const bbOf = v => { const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9]; for (let i = 0; i < v.length; i += 3) for (let a = 0; a < 3; a++) { const x = v[i + a]; if (x < mn[a]) mn[a] = x; if (x > mx[a]) mx[a] = x; } return [mn, mx]; };
+  const ROLES = [['belt', 'Belt (conveyor loop)'], ['cam', 'Drive wheel / cam'], ['hopper', 'Hopper / pill container'], ['plate', 'Back plate (pills slide on it)'], ['shell', 'Housing / walls (pills hit it)'], ['block', 'Front glass / cover'], ['gate', 'Gate (slides)'], ['servo', 'Servo'], ['link', 'Gate linkage'], ['worm', 'Worm'], ['motor', 'Motor'], ['static', 'Hardware (shown, no contact)'], ['ignore', 'Ignore (hide)']];
+  function guessRole(name, bb) {
+    const n = name.toLowerCase(), size = Math.max(...[0, 1, 2].map(a => bb[1][a] - bb[0][a]));
+    const R = [[/belt|foam(?!y\s*power)|conveyor|track/, 'belt'], [/power pulley|drive wheel|drive pulley|\bcam\b|cam gear|roller drive/, 'cam'], [/hopper|funnel|pill holder|insert|container|\bbin\b|reservoir/, 'hopper'],
+      [/back ?plate|mount(ing)? plate|backer|\bplate\b/, 'plate'], [/glass|window|lens|front block|cover|lid/, 'block'], [/\bgate\b|slide/, 'gate'], [/servo/, 'servo'], [/arm|link|crank|\brod\b|2x10mm pin/, 'link'],
+      [/worm gear|\bworm\b(?! wheel)/, 'worm'], [/worm wheel/, 'static'], [/stepper|motor|nema/, 'motor'], [/pill|tablet|capsule|caplet|advil|softgel/, 'ignore'],
+      [/bearing|idler|shaft|\bpin\b|screw|bolt|nut|washer|snap ring|circlip|bushing|spacer|vibe|vibrat|speaker|sensor|magnet|spring/, 'static'],
+      [/body|housing|shell|case|enclosure|frame|chassis|wall|main/, 'shell']];
+    for (const [re, r] of R) if (re.test(n)) return r === 'shell' && size < 15 ? 'static' : r;
+    return size > 30 ? 'shell' : 'static';
+  }
+  const baseName = n => n.replace(/\s*\(\d+\)/g, '').trim();
+  function mdTable() {
+    const groups = new Map(); MD.rows.forEach((r, k) => { const b = baseName(r.name); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(k); });
+    const esc = x => x.replace(/&/g, '&amp;').replace(/</g, '&lt;'), opts = ROLES.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
+    let h = '<tr style="position:sticky;top:0;background:#1b212b"><th style="text-align:left;padding:3px">Part</th><th>×</th><th>Size mm</th><th>Role</th><th></th></tr>';
+    for (const [b, ks] of groups) { const r = ks.map(k => MD.rows[k]).reduce((a, b) => (b.v.length > a.v.length ? b : a)), bb = r.bb, sz = [0, 1, 2].map(a => (bb[1][a] - bb[0][a]).toFixed(0)).join('×');
+      h += `<tr data-g="${ks.join(',')}" style="border-top:1px solid #2a303b"><td style="padding:3px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(b)}">${esc(b)}</td><td style="text-align:center">${ks.length}</td><td style="text-align:center;white-space:nowrap">${sz}</td><td><select class="mdRole" style="max-width:118px">${opts}</select></td><td><button class="mdRep" title="swap in a new version of this part (STEP / STL / OBJ, same coordinates as the assembly)">Replace…</button></td></tr>`; }
+    $('mdTbl').innerHTML = h; $('mdTblW').style.display = ''; $('mdBtns').style.display = '';
+    for (const tr of $('mdTbl').querySelectorAll('tr[data-g]')) { const ks = tr.dataset.g.split(',').map(Number), sel = tr.querySelector('.mdRole'); sel.value = MD.rows[ks[0]].role;
+      sel.onchange = () => { for (const k of ks) MD.rows[k].role = sel.value; };
+      tr.querySelector('.mdRep').onclick = () => { MD.repRow = ks; $('mdRepFile').click(); }; }
+  }
+  // principal axes of a point cloud (Jacobi on the 3x3 covariance)
+  function pca(v) {
+    const n = v.length / 3, c = [0, 0, 0]; for (let i = 0; i < v.length; i += 3) for (let a = 0; a < 3; a++) c[a] += v[i + a] / n;
+    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]; for (let i = 0; i < v.length; i += 3) { const d = [v[i] - c[0], v[i + 1] - c[1], v[i + 2] - c[2]]; for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) A[a][b] += d[a] * d[b] / n; }
+    const V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    for (let sw = 0; sw < 30; sw++) for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) { if (Math.abs(A[p][q]) < 1e-12) continue;
+      const th = 0.5 * Math.atan2(2 * A[p][q], A[q][q] - A[p][p]), cs = Math.cos(th), sn = Math.sin(th);
+      for (let k = 0; k < 3; k++) { const akp = A[k][p], akq = A[k][q]; A[k][p] = cs * akp - sn * akq; A[k][q] = sn * akp + cs * akq; }
+      for (let k = 0; k < 3; k++) { const apk = A[p][k], aqk = A[q][k]; A[p][k] = cs * apk - sn * aqk; A[q][k] = sn * apk + cs * aqk; }
+      for (let k = 0; k < 3; k++) { const vkp = V[k][p], vkq = V[k][q]; V[k][p] = cs * vkp - sn * vkq; V[k][q] = sn * vkp + cs * vkq; } }
+    return { c, ax: [0, 1, 2].map(j => ({ l: A[j][j], d: [V[0][j], V[1][j], V[2][j]] })).sort((a, b) => b.l - a.l) };
+  }
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], unit = a => { const l = Math.hypot(...a) || 1; return a.map(x => x / l); };
+  function findConveyor(rows) {
+    const belts = rows.filter(r => r.role === 'belt'); if (belts.length !== 2) return { err: `needs exactly 2 parts tagged Belt (found ${belts.length})` };
+    const P = belts.map(r => pca(r.v)); let eu = P[0].ax[0].d; if (eu[2] < 0) eu = eu.map(x => -x);   // run direction: up the incline
+    let ev0 = P[0].ax[2].d; let ex = unit(P[1].c.map((x, a) => x - P[0].c[a])); let A = 0, B = 1;
+    if (ex[0] < -1e-9 || (Math.abs(ex[0]) < 1e-9 && ex[1] < 0)) { ex = ex.map(x => -x); A = 1; B = 0; }
+    ex = unit(ex.map((x, a) => x - dot(ex, eu) * eu[a])); const ev = unit(cross(ex, eu)); void ev0;
+    const ext = r => { const v = r.v, mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9]; for (let i = 0; i < v.length; i += 3) { const p = [v[i], v[i + 1], v[i + 2]]; for (const [k, e] of [[0, ex], [1, eu], [2, ev]]) { const d = dot(p, e); if (d < mn[k]) mn[k] = d; if (d > mx[k]) mx[k] = d; } } return [mn, mx]; };
+    const ea = ext(belts[A]), eb = ext(belts[B]), Ra = (ea[1][0] - ea[0][0]) / 2, Rbb = (eb[1][0] - eb[0][0]) / 2, R = (Ra + Rbb) / 2;
+    const xA = (ea[0][0] + ea[1][0]) / 2, xB = (eb[0][0] + eb[1][0]) / 2, u0 = ea[0][1] + Ra, Lc = (ea[1][1] - ea[0][1]) - 2 * Ra, v0 = Math.min(ea[0][2], eb[0][2]), W = Math.max(ea[1][2], eb[1][2]) - v0;
+    const O = [0, 1, 2].map(a => xA * ex[a] + u0 * eu[a] + v0 * ev[a]);
+    return { O, ex, eu, ev, xb: xB - xA, Lc, W, R, foam: R - 5, incline: Math.asin(Math.min(1, Math.abs(eu[2]))) * 180 / PI };
+  }
+  function findWheels(rows, fr) {
+    const w = rows.filter(r => r.role === 'cam'); if (!w.length) return null;
+    const loc = p => { const d = [p[0] - fr.O[0], p[1] - fr.O[1], p[2] - fr.O[2]]; return [dot(d, fr.ex), dot(d, fr.eu), dot(d, fr.ev)]; };
+    const out = w.map(r => { const v = r.v; let mn = [1e9, 1e9], mx = [-1e9, -1e9]; for (let i = 0; i < v.length; i += 3) { const l = loc([v[i], v[i + 1], v[i + 2]]); for (let a = 0; a < 2; a++) { mn[a] = Math.min(mn[a], l[a]); mx[a] = Math.max(mx[a], l[a]); } }
+      const cx = (mn[0] + mx[0]) / 2, cu = (mn[1] + mx[1]) / 2; let rmax = 0; for (let i = 0; i < v.length; i += 3) { const l = loc([v[i], v[i + 1], v[i + 2]]); rmax = Math.max(rmax, Math.hypot(l[0] - cx, l[1] - cu)); } return { cx, cu, r: rmax, row: r }; });
+    out.sort((a, b) => a.cx - b.cx); return out;
+  }
+  function mdReport(fr, wh) {
+    if (fr.err) return `Conveyor not found: ${fr.err}.`;
+    let t = `Conveyor found: belts ${fr.xb.toFixed(2)} mm apart, straight run ${fr.Lc.toFixed(1)} mm, width ${fr.W.toFixed(1)} mm, run tilted ${fr.incline.toFixed(1)}° from horizontal, belt outer radius ${fr.R.toFixed(2)} mm (= 5 mm idler + ${fr.foam.toFixed(2)} mm foam).`;
+    if (wh) t += ` Drive wheel${wh.length > 1 ? 's' : ''}: ` + wh.map(w => `r ${w.r.toFixed(2)} mm at ${w.cu.toFixed(1)} mm up the run`).join(', ') + '.';
+    else t += ' No Drive wheel parts tagged — keeping the current drive wheels.';
+    return t;
+  }
+  function mdApply() {
+    const fr = findConveyor(MD.rows);
+    if (fr.err) { $('mdInfo').innerHTML = `<span class="warn">Can't use this model yet — ${fr.err}.</span> Tag the two belt loops as “Belt”.`; return; }
+    const wh = findWheels(MD.rows, fr), keep = MD.rows.filter(r => r.role !== 'ignore' && r.role !== 'belt');
+    const has = role => keep.some(r => r.role === role);
+    const parts = keep.map((r, k) => ({ id: 'm' + k, name: r.name, role: r.role, vArr: r.v, tArr: r.t, rot: r.role === 'gate' ? 'gate' : r.role === 'cam' && wh ? (wh[0].row === r ? 'camA' : 'camB') : null }));
+    // keep the built-in gate train when the model has none (the slide gate + servo are part of the dispenser either way)
+    if (!has('gate')) for (const p of ORIG.parts) if (p.role === 'gate' || p.role === 'servo' || p.role === 'link') parts.push(p);
+    CAD.parts = parts; CAD.frame = { O: fr.O, ex: fr.ex, eu: fr.eu, ev: fr.ev, xb: fr.xb };
+    if (wh) { const a = wh[0], b = wh[wh.length - 1]; CAD.cam = Object.assign({}, ORIG.cam, { cx: a.cx, cu: a.cu, cxB: wh.length > 1 ? b.cx : fr.xb - a.cx, cuB: wh.length > 1 ? b.cu : a.cu, profile: new Array(72).fill(+a.r.toFixed(3)), custom: true }); camGen = genCam(CAD.cam.profile); }
+    const hop = keep.filter(r => r.role === 'hopper'); if (hop.length) { const m = mergeMeshes(hop); CAD.spawn = spawnFrom(m.v, m.t); } else delete CAD.spawn;
+    hopRaw = null; const dTop = fr.Lc - FFx.GEOM0.uTop, Wm = fr.W; S.geom = { bot: 0, top: Math.abs(dTop) < 0.3 ? 0 : +dTop.toFixed(2), W: Math.abs(Wm - 8) < 0.3 ? 8 : Math.min(20, Math.max(4, +Wm.toFixed(2))) };   // within CAD tolerance = the reference layout
+    meshCache.clear(); refreshFrame(); MD.applied = true; MD.foam = fr.foam; MD.foamOK = null;
+    rebuildGLParts(); rebuildGlass(); newSim(); syncUI(); applyGeom && applyGeom(); fitAll();
+    thickFlag(); if (Math.abs(fr.foam - S.thick) >= 0.2) { const sec = [...document.querySelectorAll('section.sec')].find(x => x.dataset.t === 'Foam belts'); if (sec) sec.classList.add('open'); }
+    $('mdInfo').innerHTML = `<span class="ok">Using your model (${keep.length} parts).</span> ` + mdReport(fr, wh) + (Math.abs(fr.foam - S.thick) >= 0.2 ? ' <span class="warn">Foam thickness differs from your model — see the choice under Foam.</span>' : '') + (has('gate') ? ' Gate: your gate part, moved by the built-in servo linkage.' : ' Gate: built-in.');
+  }
+  // imported model vs the foam setting: flag a mismatch and let the user pick the model's foam or keep their own. Their
+  // own value is simulated as real foam of that thickness on the model's idlers and drive wheels (thicker = belts grow
+  // outward, nip closes), exactly as if that foam were fitted to this hardware.
+  function thickFlag() {
+    const el = $('thickFlag'); if (!MD.applied || MD.foam == null || Math.abs(MD.foam - S.thick) < 0.2) { el.style.display = 'none'; return; }
+    const ng = sim ? sim.nipGap() : null, nip = ng ? ` With ${S.thick} mm the gap at the drive wheels is ${Math.max(0, ng.min * 1e3).toFixed(2)} mm${ng.min < 0 ? ` (foam pressed ${(-ng.min * 1e3).toFixed(2)} mm into foam)` : ''}, ${(ng.rest * 1e3).toFixed(2)} mm elsewhere.` : '';
+    el.innerHTML = `⚠ Your model's belts are <b>${MD.foam.toFixed(2)} mm</b> thick; the setting is <b>${S.thick} mm</b> (${S.thick > MD.foam ? 'thicker' : 'thinner'} than the real part).${nip}<div class="btns" style="margin-top:4px"><button id="tfModel">Use model size (${MD.foam.toFixed(1)} mm)</button><button id="tfKeep">Keep ${S.thick} mm</button></div>`;
+    el.style.display = '';
+    $('tfModel').onclick = () => { S.thick = +MD.foam.toFixed(1); $('thick').value = S.thick; $('thickV').textContent = S.thick; applyParams(); geoInfo(); thickFlag(); };
+    $('tfKeep').onclick = () => { MD.foamOK = S.thick; el.style.display = 'none'; };
+    if (MD.foamOK === S.thick) el.style.display = 'none';
+  }
+  function mdOriginal() { CAD.parts = ORIG.parts.slice(); CAD.frame = JSON.parse(JSON.stringify(ORIG.frame)); CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; if (ORIG.spawn) CAD.spawn = JSON.parse(JSON.stringify(ORIG.spawn)); else delete CAD.spawn;
+    meshCache.clear(); refreshFrame(); MD.applied = false; MD.foam = null; $('thickFlag').style.display = 'none'; S.geom = { bot: 0, top: 0, W: 8 }; rebuildGLParts(); rebuildGlass(); newSim(); syncUI(); $('mdInfo').textContent = 'Using the built-in FoamFeed model.'; }
+  $('mdLoad').onclick = () => $('mdFile').click();
+  $('mdFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    $('mdInfo').textContent = `Reading ${f.name}… (the first time also downloads the STEP reader, ~8 MB)`; await new Promise(r => setTimeout(r, 30));
+    try { const t0 = performance.now(), ms = await readStep(f);
+      MD.rows = ms.map(m => { const bb = bbOf(m.v); return { name: m.name, v: m.v, t: m.t, bb, role: guessRole(m.name, bb) }; });
+      mdTable(); const fr = findConveyor(MD.rows), wh = fr.err ? null : findWheels(MD.rows, fr);
+      $('mdInfo').innerHTML = `Read ${MD.rows.length} solids from ${f.name} in ${((performance.now() - t0) / 1000).toFixed(1)} s. Check the roles, then press <b>Use this model</b>. ` + mdReport(fr, wh);
+    } catch (err) { $('mdInfo').innerHTML = `<span class="warn">${err.message}</span>`; } };
+  $('mdFind').onclick = () => { const fr = findConveyor(MD.rows); $('mdInfo').textContent = mdReport(fr, fr.err ? null : findWheels(MD.rows, fr)); };
+  $('mdApply').onclick = mdApply; $('mdOrig').onclick = mdOriginal;
+  $('mdRepFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; const ks = MD.repRow; if (!f || !ks || ks < 0) return;
+    try { const ext = f.name.split('.').pop().toLowerCase(), m = ext === 'step' || ext === 'stp' ? mergeMeshes(await readStep(f)) : await readMesh(f);
+      const role = MD.rows[ks[0]].role, nm = baseName(MD.rows[ks[0]].name) + ' ← ' + f.name; const keep = MD.rows.filter((_, k) => !ks.includes(k));
+      keep.splice(ks[0], 0, { name: nm, v: m.v, t: m.t, bb: bbOf(m.v), role }); MD.rows = keep; mdTable();
+      if (MD.applied) mdApply(); else $('mdInfo').textContent = `Replaced with ${f.name}. Press Use this model to rebuild.`;
+    } catch (err) { $('mdInfo').innerHTML = `<span class="warn">${f.name}: ${err.message}</span>`; } };
   function applyTire() { const sa = +$('tireMat').value, t = +$('tireT').value; S.tireA = sa; S.tireT = t; if (sim) { sim.P.tireE = shoreAtoE(sa); sim.P.tireT = t * 1e-3; } }
   function humAvg() { const h = sim && sim.hum; if (!h) return null; const d0 = sim.stats.delivered ? (sim.stats.gateOpenS || 0) / sim.stats.delivered : 0.25;
     const d = Math.min(1, +$('hmDoses').value * d0 / 86400), a = d / h.tauOpen, b = (1 - d) / h.tauDes; return { rh: (a * h.amb + b * h.des) / (a + b), perDose: d0, measured: !!sim.stats.delivered }; }
@@ -2849,14 +3344,21 @@ body.nonotes aside small{display:none}
   let st = {}; try { st = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} };
   const toast = $('ffToast'); if (toast) document.body.appendChild(toast);
-  const ORDER = { L: ['Pills', 'Drive', 'Singulator (bump at the entry)', 'Sensors & feed control', 'Vibration (speaker)', 'Foam belts', 'Belt layout', 'Hopper throat', 'Belt texture', 'Geometry'],
-                  R: ['Dispensing', 'Pill loads', 'Dust', 'Tack', 'Belts', 'View', 'Simulation', 'Trial runner'] };
-  const OPEN = new Set(['Pills', 'Drive', 'Sensors & feed control', 'Dispensing', 'Pill loads']);
+  // natural first-time workflow: 1 choose pills -> 2 run it -> 3 change the machine -> 4 environment; right side: results, then tools
+  const ORDER = { L: ['Pills', 'Dispenser bank', 'Sensors & feed control', 'Drive', 'Vibration (speaker)', 'Machine model', 'Geometry', 'Foam belts', 'Belt layout', 'Hopper throat', 'Singulator (bump at the entry)', 'Belt texture', 'Imported parts', 'Humidity (chamber)'],
+                  R: ['Dispensing', 'Pill loads', 'Belts', 'Dust', 'Tack', 'Trial runner', 'View', 'Simulation'] };
+  const OPEN = new Set(['Pills', 'Sensors & feed control', 'Dispensing']);
+  // step headers shown above the first card of each group, and plain-language card names (internal keys unchanged)
+  const STEP = { 'Pills': '1 · What to dispense', 'Dispenser bank': '2 · Run it',  'Machine model': '3 · Machine design', 'Imported parts': '4 · Extra parts (manifold, collector…)', 'Humidity (chamber)': '5 · Environment', 'Dispensing': 'Results', 'Trial runner': 'Tools' };
+  const NAME = { 'Pills': 'Pills', 'Dispenser bank': 'Dispenser bank (up to 32)', 'Sensors & feed control': 'Dispense control & sensors', 'Drive': 'Belt speed', 'Vibration (speaker)': 'Vibrator (hopper shaker)', 'Machine model': 'Machine model (STEP assembly)', 'Geometry': 'Cam & container files', 'Foam belts': 'Foam (material, thickness)', 'Belt layout': 'Belt position & width', 'Hopper throat': 'Hopper throat (entry walls)', 'Singulator (bump at the entry)': 'Singulator knob', 'Belt texture': 'Belt surface texture', 'Imported parts': 'Import your own parts', 'Humidity (chamber)': 'Humidity', 'Dispensing': 'Dispensing results', 'Pill loads': 'Squeeze on pills', 'Belts': 'Foam wear', 'Dust': 'Dust', 'Tack': 'Stickiness (tack)', 'Trial runner': 'Timed trial', 'View': 'View options', 'Simulation': 'Save / load & accuracy' };
   const txt = id => { const e = $(id); return e ? (e.tagName === 'SELECT' ? (e.options[e.selectedIndex] || {}).text || '' : e.value != null && e.tagName === 'INPUT' ? e.value : e.textContent).trim() : ''; };
   const S_ = () => (window.__FF && window.__FF.S) || {};
   const SUM = {
     'Pills': () => { const p = S_().pill || {}; return `${p.shape || ''} ${p.shape === 'tablet' || p.shape === 'sphere' ? p.W : (p.L || '') + '×' + p.W} mm · ${txt('pMat').split(' (')[0]} · ${S_().count} pills`; },
     'Drive': () => `${txt('rpm')} rpm`,
+    'Dispenser bank': () => { const n = +($('bkN').value || 1); return n > 1 ? `${n} dispensers` : 'single dispenser'; },
+    'Machine model': () => (txt('mdInfo').split('.')[0] || '').slice(0, 48),
+    'Imported parts': () => { const n = +($('xpSel').dataset.n || 0); return n ? `${n} part${n > 1 ? 's' : ''}` : 'none'; },
     'Singulator (bump at the entry)': () => $('sgOn') && $('sgOn').checked ? `${txt('sgAxis').split(' ')[0]} r ${txt('sgR')} mm · μ ${txt('sgMu')}` : 'off',
     'Sensors & feed control': () => txt('r_ct'),
     'Vibration (speaker)': () => /ON/.test(txt('vibBtn')) ? `ON · ${txt('vibF')} Hz · ${txt('vibA')} g` : 'off',
@@ -2876,7 +3378,8 @@ body.nonotes aside small{display:none}
     const ord = ORDER[side]; secs.sort((a, b) => (ord.indexOf(a.title) + 1 || 99) - (ord.indexOf(b.title) + 1 || 99));
     for (const c of secs) {
       const sec = document.createElement('section'); sec.className = 'sec'; sec.dataset.t = c.title;
-      const h = document.createElement('button'); h.type = 'button'; h.className = 'sech'; h.innerHTML = '<span class="chev">▸</span><span class="ttl"></span><span class="sum"></span>'; h.querySelector('.ttl').textContent = c.title;
+      const h = document.createElement('button'); h.type = 'button'; h.className = 'sech'; h.innerHTML = '<span class="chev">▸</span><span class="ttl"></span><span class="sum"></span>'; h.querySelector('.ttl').textContent = NAME[c.title] || c.title;
+      if (STEP[c.title]) { const sh = document.createElement('div'); sh.className = 'stepH'; sh.textContent = STEP[c.title]; aside.appendChild(sh); }
       const body = document.createElement('div'); body.className = 'secb'; for (const n of c.nodes) body.appendChild(n);
       sec.append(h, body); aside.appendChild(sec);
       const open = st[c.title] != null ? st[c.title] : OPEN.has(c.title); sec.classList.toggle('open', open);
@@ -2895,6 +3398,8 @@ body.nonotes aside small{display:none}
   group('Pills', 'Surface & physics (density, friction, bounce)', 'pDen', 'pRest');
   group('Sensors & feed control', 'Feed timing (stop delay, ramp, backlash, timeout, gap)', 'ctDelay', 'ctVib');
   group('Sensors & feed control', 'Gate (servo slide gate)', 'gtOpenOn', 'r_gate');
+  group('Sensors & feed control', 'Double-feed protection (S1 length & gap check)', 'pbOn', 'r_probe');
+  group('Sensors & feed control', 'Back up after each pill', 'ctBack', 'ctBackV');
   group('Sensors & feed control', 'Sensor setup (S1–S3: position, beam, timing)', 'snSel', 'snEdge');
   // toolbar: search + expand/collapse + notes
   const left = document.querySelector('#app > aside:not(.r)'), bar = document.createElement('div'); bar.id = 'uiTools';
@@ -2909,7 +3414,7 @@ body.nonotes aside small{display:none}
     for (const x of sections) {
       const body = x.sec.querySelector('.secb'), items = body.querySelectorAll('.row, .kv > b, .btns, details.grp');
       if (!q) { x.sec.classList.remove('ff-hide'); x.sec.classList.toggle('open', st[x.title] != null ? st[x.title] : OPEN.has(x.title)); body.querySelectorAll('.ff-hide').forEach(e => e.classList.remove('ff-hide')); continue; }
-      const tmatch = x.title.toLowerCase().includes(q); let any = tmatch;
+      const tmatch = (x.title + ' ' + (NAME[x.title] || '')).toLowerCase().includes(q); let any = tmatch;
       body.querySelectorAll('.row, .btns').forEach(r => { const hit = tmatch || (r.textContent + ' ' + [...r.querySelectorAll('[title]')].map(e => e.title).join(' ')).toLowerCase().includes(q); r.classList.toggle('ff-hide', !hit); if (hit) { any = true; const d = r.closest('details'); if (d) d.open = true; } });
       x.sec.classList.toggle('ff-hide', !any); x.sec.classList.toggle('open', any);
     }
