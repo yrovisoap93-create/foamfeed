@@ -2050,7 +2050,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, rayTri, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -2633,7 +2633,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const C = sim.ctrl, was = C.mode;
     for (const k of ['ramp_ms', 'stop_delay_ms', 'timeout_s', 'gap_ms', 'vib_with_motor', 'trigger', 'backup', 'backup_mm', 'backup_mm_s', 'backlash_deg', 'gate_close_ms', 'gate_wait_s', 'wait_gate', 'snap_on_double', 'release_wait_s', 'gate_open_on', 'probe_check', 'stack_tol_pct', 'min_gap_mm', 'gate_lead_ms', 'vib_s1', 'clear_max_s', 'clear_retries', 'safety_on', 'safety_auto', 'safety_push_mm', 'safety_margin_mm', 'safety_speed_mm_s']) if (c[k] !== undefined) C[k] = c[k];
     if (sim.safety) { const s = sim.safety; s.speed = Math.max(1, c.safety_speed_mm_s ?? 50) * 1e-3; const tp = S.pill && S.pill.safety_push_mm; s.auto = tp == null ? FFx.safetyAutoPush(sim, (c.safety_margin_mm ?? 1) * 1e-3) : null; s.push = s.auto ? s.auto.push : Math.max(0, tp) * 1e-3; s.max = (s.prof.w.length - 1) * s.prof.dy; }
-    if (sim.gate) { const g = sim.gate, st = c.gate_stroke_mm ?? 17; g.strokeMM = st; g.travel = FFx.gateTravelFor(g, (g.base || 0) + st); sim.gate.speed = c.gate_speed; }
+    if (sim.gate) { const g = sim.gate, st = Math.min(c.gate_stroke_mm ?? 17, (g.link.wall || 99) - (g.base || 0)); g.strokeMM = st; g.travel = FFx.gateTravelFor(g, (g.base || 0) + st); sim.gate.speed = c.gate_speed; }
     c.sensors.forEach((x, i) => { for (const k of ['on', 'zone', 'pos_mm', 'up_mm', 'below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'min_clear_ms', 'count_on']) if (x[k] !== undefined) C.sensors[i][k] = x[k]; });
     C.mode = c.mode; C.rpmRun = S.rpm;
     if (c.mode === 'feed' && was !== 'feed') { C.gWant = false; C.outN = C.exitN; C.held = 0; C.snap = false; C.snapPend = false; C.s2q.length = 0; C.p1q.length = 0; C.closeAt = null; C.awaitClear = false; C.awaitS3 = null; C.state = 'idle'; C.queue = 0; sim.P.rpm = 0; C.mRpm = 0; C.lash = null; sim.vibEnv = 0; }
@@ -2647,6 +2647,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       e.min = R[0]; e.max = R[1]; e.step = R[2]; e.value = v; $('snBelowV').textContent = v; $('snBelowL').textContent = z === 'probe' ? 'Position (up from bottom idler)' : z === 'entry' ? 'Position (above top idler)' : z === 'gate' ? 'Position (below gate)' : 'Position (down chute)'; }
     $('snOn').checked = !!sn.on; $('snTrig').checked = c.trigger === c.sel; $('snAxis').value = sn.axis; $('snEdge').value = sn.count_on;
     $('btnFeedStop').disabled = c.mode !== 'feed';
+    if (sim && sim.gate) { const mx = +(((sim.gate.link.wall || 20) - (sim.gate.base || 0))).toFixed(1), e = $('gtTrav'); e.max = mx; if (+e.value > mx) { e.value = mx; } $('gtTravV').textContent = Math.min(+(c.gate_stroke_mm ?? 17), mx); }
     { const sf = sim && sim.safety; $('sfOn').checked = c.safety_on !== false; $('sfAuto').checked = S.pill.safety_push_mm == null; $('sfMargin').value = c.safety_margin_mm ?? 1; $('sfMarginV').textContent = c.safety_margin_mm ?? 1;
       const pv = sf ? +(sf.push * 1e3).toFixed(2) : S.pill.safety_push_mm ?? 6; if (sf) $('sfPush').max = Math.min(30, +(sf.max * 1e3).toFixed(1)); $('sfPush').value = pv; $('sfPushV').textContent = pv; $('sfPush').disabled = !sf; }
     backUI();
@@ -3298,7 +3299,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function xpReadouts() { if (xpCur < 0 || !sim || !sim.xp || !sim.xp[xpCur]) { $('r_xpHits').textContent = '—'; return; } const q = sim.xp[xpCur]; $('r_xpHits').textContent = q.count ? `${q.seen ? q.seen.size : 0} different pills · peak push ${fmt(q.Fpk || 0, 2)} N` : 'tick “Count pills reaching it”'; }
   /* ================================================================ machine model: STEP assembly import, roles, conveyor finder */
   const MD = { rows: [], applied: false, repRow: -1 };
-  ORIG.frame = JSON.parse(JSON.stringify(CAD.frame)); ORIG.spawn = CAD.spawn ? JSON.parse(JSON.stringify(CAD.spawn)) : null;
+  ORIG.frame = JSON.parse(JSON.stringify(CAD.frame)); ORIG.gateLink = CAD.gateLink ? JSON.parse(JSON.stringify(CAD.gateLink)) : null; ORIG.spawn = CAD.spawn ? JSON.parse(JSON.stringify(CAD.spawn)) : null;
   let occtP = null;
   // OpenCascade (WASM, ~7.6 MB, jsDelivr CDN) runs in a background worker so the page keeps animating while a big
   // assembly is meshed (~25 s for a 35 MB file)
@@ -3406,6 +3407,53 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const O = [0, 1, 2].map(k => fr.O[k] + c * fr.ev[k]);
     return { O, ex, eu, ev, lift: c, tiltDeg: Math.atan(b) * 180 / PI, tiltXDeg: Math.atan(a) * 180 / PI };
   }
+  /* Servo gate linkage from the model itself: pin holes are found as circles in the y-z plane (pins along x) of the two
+     link parts and the gate; the hole the horn and rod share is the horn pin, the hole the rod and gate share is the gate pin,
+     the horn's other (spline) hole is the servo axis. The slot ends come from the housing: the gate closes against the wall
+     in front of it and its tail meets the back wall at full stroke. The model may be drawn at any servo angle: the gate and
+     both arms are put back to the closed pose, so the sim's servo drives the model's own parts. */
+  function circlesYZ(v) {
+    const key = new Set(), P = []; for (let i = 0; i < v.length; i += 3) { const k = Math.round(v[i + 1] * 500) + ',' + Math.round(v[i + 2] * 500); if (!key.has(k)) { key.add(k); P.push([v[i + 1], v[i + 2]]); } }
+    let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff, found = [];
+    for (let it = 0; it < 20000 && P.length >= 3; it++) { const a = P[Math.floor(rnd() * P.length)], b = P[Math.floor(rnd() * P.length)], c = P[Math.floor(rnd() * P.length)];
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 12 || Math.hypot(a[0] - c[0], a[1] - c[1]) > 12) continue;
+      const A00 = b[0] - a[0], A01 = b[1] - a[1], A10 = c[0] - a[0], A11 = c[1] - a[1], det = A00 * A11 - A01 * A10; if (Math.abs(det) < 1e-6) continue;
+      const B0 = 0.5 * (b[0] * b[0] + b[1] * b[1] - a[0] * a[0] - a[1] * a[1]), B1 = 0.5 * (c[0] * c[0] + c[1] * c[1] - a[0] * a[0] - a[1] * a[1]), cy = (B0 * A11 - A01 * B1) / det, cz = (A00 * B1 - B0 * A10) / det, r = Math.hypot(a[0] - cy, a[1] - cz);
+      if (r < 0.5 || r > 6) continue; let sup = 0; for (const p of P) if (Math.abs(Math.hypot(p[0] - cy, p[1] - cz) - r) < 0.02) sup++;
+      if (sup >= 10) found.push([cy, cz, r, sup]); }
+    found.sort((a, b) => b[3] - a[3]); const out = []; for (const f of found) if (out.every(o => Math.hypot(f[0] - o[0], f[1] - o[1]) > 0.3 || Math.abs(f[2] - o[2]) > 0.3)) out.push(f);
+    return out;
+  }
+  function rayRowsY(rows, x, y, z, dir) { let best = Infinity;
+    for (const r of rows) { const v = r.v, t = r.t; for (let i = 0; i < t.length; i += 3) { const T = [t[i], t[i + 1], t[i + 2]].map(j => [v[j * 3] * 1e-3, v[j * 3 + 1] * 1e-3, v[j * 3 + 2] * 1e-3]).flat(); const d = FFx.rayTri(x * 1e-3, y * 1e-3, z * 1e-3, 0, dir, 0, T, 0); if (d > 1e-7 && d * 1e3 < best) best = d * 1e3; } }
+    return best; }
+  function modelLinkage(rows) {
+    const gr = rows.filter(r => r.role === 'gate'), lk = rows.filter(r => r.role === 'link'); if (gr.length !== 1 || lk.length !== 2) return null;
+    const g = gr[0], cg = circlesYZ(g.v), c0 = circlesYZ(lk[0].v), c1 = circlesYZ(lk[1].v), near = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.2 && Math.abs(a[2] - b[2]) < 0.3;
+    const shared = (A, B) => { for (const a of A) for (const b of B) if (near(a, b)) return a; return null; };
+    let rod, horn, cR, cH; if (shared(c0, cg)) { rod = lk[0]; horn = lk[1]; cR = c0; cH = c1; } else if (shared(c1, cg)) { rod = lk[1]; horn = lk[0]; cR = c1; cH = c0; } else return null;
+    const p1 = shared(cR, cg), p2 = shared(cR, cH); if (!p1 || !p2) return null;
+    const Cc = cH.filter(c => Math.hypot(c[0] - p2[0], c[1] - p2[1]) > 2).sort((a, b) => b[2] - a[2] || b[3] - a[3])[0]; if (!Cc) return null; const C = [Cc[0], Cc[1]];
+    // slot ends along y at the gate's mid line
+    // the gate's end faces (vertices at its min / max y, nudged 0.05 mm inside) are cast along the slot; the nearest wall wins
+    const bb = g.bb, xm = (bb[0][0] + bb[1][0]) / 2, zm = (bb[0][2] + bb[1][2]) / 2, walls = rows.filter(r => r.role === 'shell' || r.role === 'plate');
+    // sample points on a grid across the end face, keep those inside the gate material (odd crossings of the gate's own
+    // surface along the slot), cast each toward the wall: a groove or notch in the gate is not mistaken for material
+    const crossings = (x, y, z, dir) => { let n = 0; const v = g.v, t = g.t; for (let i = 0; i < t.length; i += 3) { const T = [t[i], t[i + 1], t[i + 2]].map(j => [v[j * 3] * 1e-3, v[j * 3 + 1] * 1e-3, v[j * 3 + 2] * 1e-3]).flat(); if (FFx.rayTri(x * 1e-3, y * 1e-3, z * 1e-3, 0, dir, 0, T, 0) > 0) n++; } return n; };
+    const endHit = (yEnd, dir) => { let best = Infinity; const y = yEnd - dir * 0.03;
+      for (let a = 0; a < 9; a++) for (let b = 0; b < 7; b++) { const x = bb[0][0] + 0.1 + (bb[1][0] - bb[0][0] - 0.2) * a / 8 + 0.0137, z = bb[0][2] + 0.05 + (bb[1][2] - bb[0][2] - 0.1) * b / 6 + 0.0071;
+        if ((crossings(x, y, z, -dir) & 1) === 0) continue; best = Math.min(best, rayRowsY(walls, x, y, z, dir) - 0.03); } return best; };
+    const front = bb[0][1] - endHit(bb[0][1], -1), back = bb[1][1] + endHit(bb[1][1], 1);
+    if (!isFinite(front) || !isFinite(back)) return null;
+    const gS = front - bb[0][1], wall = back - (bb[1][1] + gS), p1c = [p1[0] + gS, p1[1]], r = Math.hypot(p2[0] - C[0], p2[1] - C[1]), Lr = Math.hypot(p1[0] - p2[0], p1[1] - p2[1]);
+    // closed horn pin: on the horn circle, a rod length from the closed gate pin, on the side behind it (the stroke model's branch)
+    const d = Math.hypot(p1c[0] - C[0], p1c[1] - C[1]), a = (r * r - Lr * Lr + d * d) / (2 * d), h = Math.sqrt(Math.max(0, r * r - a * a)), ex = [(p1c[0] - C[0]) / d, (p1c[1] - C[1]) / d], m = [C[0] + a * ex[0], C[1] + a * ex[1]];
+    const S2 = [[m[0] - h * ex[1], m[1] + h * ex[0]], [m[0] + h * ex[1], m[1] - h * ex[0]]].filter(q => q[0] < p1c[0]); if (!S2.length) return null; const p2c = S2[0];
+    const dH = Math.atan2(p2c[1] - C[1], p2c[0] - C[0]) - Math.atan2(p2[1] - C[1], p2[0] - C[0]), dR = Math.atan2(p1c[1] - p2c[1], p1c[0] - p2c[0]) - Math.atan2(p1[1] - p2[1], p1[0] - p2[0]);
+    const rot = (v, cy, cz, ang, ty, tz) => { const o = new Float32Array(v), c = Math.cos(ang), s = Math.sin(ang); for (let i = 0; i < o.length; i += 3) { const y = v[i + 1] - cy, z = v[i + 2] - cz; o[i + 1] = cy + ty + y * c - z * s; o[i + 2] = cz + tz + y * s + z * c; } return o; };
+    return { gS, horn, rod, hornV: rot(horn.v, C[0], C[1], dH, 0, 0), rodV: rot(rod.v, p2[0], p2[1], dR, p2c[0] - p2[0], p2c[1] - p2[1]),
+      link: { C, p2: p2c, p1: p1c, wall_mm: wall, clear_mm: wall, prod: { closed_edge_mm: 2.5, stroke_mm: Math.min(17, wall) }, model: true, sweepDeg: 0 }, front, back };
+  }
   function findWheels(rows, fr) {
     const w = rows.filter(r => r.role === 'cam'); if (!w.length) return null;
     const loc = p => { const d = [p[0] - fr.O[0], p[1] - fr.O[1], p[2] - fr.O[2]]; return [dot(d, fr.ex), dot(d, fr.eu), dot(d, fr.ev)]; };
@@ -3424,17 +3472,19 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const fr = findConveyor(MD.rows);
     if (!fr.err) { const st = seatOnPlate(MD.rows, fr); if (st) { fr.O = st.O; fr.ex = st.ex; fr.eu = st.eu; fr.ev = st.ev; fr.seat = st; } }
     if (fr.err) { $('mdInfo').innerHTML = `<span class="warn">Can't use this model yet — ${fr.err}.</span> Tag the two belt loops as “Belt”.`; return; }
-    const wh = findWheels(MD.rows, fr), keep = MD.rows.filter(r => r.role !== 'ignore' && r.role !== 'belt' && r.role !== 'link');
+    const wh = findWheels(MD.rows, fr), ML = modelLinkage(MD.rows), keep = MD.rows.filter(r => r.role !== 'ignore' && r.role !== 'belt' && (r.role !== 'link' || ML));
     const has = role => keep.some(r => r.role === role);
     // the sim drives the gate from its closed pose (front edge at y 2.5, as in the reference CAD); a model saved with the gate
     // open is slid back along y to closed
-    let gShift = 0; { const gr = keep.filter(r => r.role === 'gate'); if (gr.length) { const y0 = Math.min(...gr.map(r => r.bb[0][1])); if (Math.abs(y0 - 2.48) > 1) gShift = 2.48 - y0; } }
+    let gShift = 0; if (ML) gShift = ML.gS; else { const gr = keep.filter(r => r.role === 'gate'); if (gr.length) { const y0 = Math.min(...gr.map(r => r.bb[0][1])); if (Math.abs(y0 - 2.48) > 1) gShift = 2.48 - y0; } }
     const shY = v => { const o = new Float32Array(v); for (let i = 1; i < o.length; i += 3) o[i] += gShift; return o; };
-    const parts = keep.map((r, k) => ({ id: 'm' + k, name: r.name, role: r.role, vArr: r.role === 'gate' && gShift ? shY(r.v) : r.v, tArr: r.t, rot: r.role === 'gate' ? 'gate' : r.role === 'safety' ? 'safety' : r.role === 'cam' && wh ? (wh[0].row === r ? 'camA' : 'camB') : null }));
+    const parts = keep.map((r, k) => ({ id: 'm' + k, name: r.name, role: r.role, vArr: r.role === 'gate' && gShift ? shY(r.v) : ML && r === ML.horn ? ML.hornV : ML && r === ML.rod ? ML.rodV : r.v, tArr: r.t,
+      rot: r.role === 'gate' ? 'gate' : r.role === 'safety' ? 'safety' : ML && r === ML.horn ? 'crank' : ML && r === ML.rod ? 'rod' : r.role === 'cam' && wh ? (wh[0].row === r ? 'camA' : 'camB') : null }));
+    CAD.gateLink = ML ? ML.link : (ORIG.gateLink ? JSON.parse(JSON.stringify(ORIG.gateLink)) : CAD.gateLink);
     // keep the built-in gate train when the model has none (the slide gate + servo are part of the dispenser either way);
     // the linkage arms always come from the built-in model so they move with the servo
     if (!has('gate')) { for (const p of ORIG.parts) if (p.role === 'gate' || p.role === 'servo' || p.role === 'link') parts.push(p); }
-    else for (const p of ORIG.parts) if (p.role === 'link') parts.push(p);
+    else if (!ML) for (const p of ORIG.parts) if (p.role === 'link') parts.push(p);
     CAD.parts = parts; CAD.frame = { O: fr.O, ex: fr.ex, eu: fr.eu, ev: fr.ev, xb: fr.xb };
     if (wh) { const a = wh[0], b = wh[wh.length - 1]; CAD.cam = Object.assign({}, ORIG.cam, { cx: a.cx, cu: a.cu, cxB: wh.length > 1 ? b.cx : fr.xb - a.cx, cuB: wh.length > 1 ? b.cu : a.cu, profile: new Array(72).fill(+a.r.toFixed(3)), custom: true }); camGen = genCam(CAD.cam.profile); }
     const hop = keep.filter(r => r.role === 'hopper'); if (hop.length) { const m = mergeMeshes(hop); CAD.spawn = spawnFrom(m.v, m.t); } else delete CAD.spawn;
@@ -3442,7 +3492,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     meshCache.clear(); refreshFrame(); MD.applied = true; MD.foam = fr.foam; MD.foamOK = null;
     rebuildGLParts(); rebuildGlass(); newSim(); syncUI(); applyGeom && applyGeom(); fitAll();
     thickFlag(); if (Math.abs(fr.foam - S.thick) >= 0.2) { const sec = [...document.querySelectorAll('section.sec')].find(x => x.dataset.t === 'Foam belts'); if (sec) sec.classList.add('open'); }
-    $('mdInfo').innerHTML = `<span class="ok">Using your model (${keep.length} parts).</span> ` + mdReport(fr, wh) + (Math.abs(fr.foam - S.thick) >= 0.2 ? ' <span class="warn">Foam thickness differs from your model — see the choice under Foam.</span>' : '') + (has('gate') ? ` Gate: your gate part${gShift ? ` (drawn open in the model — moved ${(-gShift).toFixed(1)} mm back to closed)` : ''}, moved by the built-in servo linkage.` : ' Gate: built-in.') + (has('safety') ? ' Pill width safety gate: your part, slides in along y (see Feed control).' : '');
+    $('mdInfo').innerHTML = `<span class="ok">Using your model (${keep.length} parts).</span> ` + mdReport(fr, wh) + (Math.abs(fr.foam - S.thick) >= 0.2 ? ' <span class="warn">Foam thickness differs from your model — see the choice under Foam.</span>' : '') + (has('gate') ? ` Gate: your gate part${gShift ? ` (drawn open in the model — moved ${(-gShift).toFixed(1)} mm back to closed)` : ''}` + (ML ? `, driven by your own motion arms (servo axis y ${ML.link.C[0].toFixed(1)} z ${ML.link.C[1].toFixed(1)}, horn ${Math.hypot(ML.link.p2[0] - ML.link.C[0], ML.link.p2[1] - ML.link.C[1]).toFixed(1)} mm, rod ${Math.hypot(ML.link.p1[0] - ML.link.p2[0], ML.link.p1[1] - ML.link.p2[1]).toFixed(1)} mm); closes against the wall at y ${ML.front.toFixed(1)}, full stroke ${ML.link.wall_mm.toFixed(1)} mm to the back wall.` : ', moved by the built-in servo linkage.') : ' Gate: built-in.') + (has('safety') ? ' Pill width safety gate: your part, slides in along y (see Feed control).' : '');
   }
   // imported model vs the foam setting: flag a mismatch and let the user pick the model's foam or keep their own. Their
   // own value is simulated as real foam of that thickness on the model's idlers and drive wheels (thicker = belts grow
@@ -3456,7 +3506,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     $('tfKeep').onclick = () => { MD.foamOK = S.thick; el.style.display = 'none'; };
     if (MD.foamOK === S.thick) el.style.display = 'none';
   }
-  function mdOriginal() { CAD.parts = ORIG.parts.slice(); CAD.frame = JSON.parse(JSON.stringify(ORIG.frame)); CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; if (ORIG.spawn) CAD.spawn = JSON.parse(JSON.stringify(ORIG.spawn)); else delete CAD.spawn;
+  function mdOriginal() { CAD.parts = ORIG.parts.slice(); if (ORIG.gateLink) CAD.gateLink = JSON.parse(JSON.stringify(ORIG.gateLink)); CAD.frame = JSON.parse(JSON.stringify(ORIG.frame)); CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; if (ORIG.spawn) CAD.spawn = JSON.parse(JSON.stringify(ORIG.spawn)); else delete CAD.spawn;
     FFx.setGeom0(null); meshCache.clear(); refreshFrame(); MD.applied = false; MD.foam = null; $('thickFlag').style.display = 'none'; S.geom = { bot: 0, top: 0, W: 8 }; rebuildGLParts(); rebuildGlass(); newSim(); syncUI(); $('mdInfo').textContent = 'Using the built-in FoamFeed model.'; }
   $('mdLoad').onclick = () => $('mdFile').click();
   $('mdFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
