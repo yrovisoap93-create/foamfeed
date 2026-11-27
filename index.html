@@ -302,6 +302,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 <div class="btns"><button id="btnPeak">Reset peaks</button></div>
 <h2>Dust</h2>
 <div class="kv"><b>Generated</b><span id="r_dust"></span><b>Per pill out</b><span id="r_dustPP"></span><b>Where</b><span id="r_dustW"></span><b>Worst pill</b><span id="r_dustPk"></span></div>
+<div class="kv"><b title="dust that leaves this dispenser: specks that fall out through the drop path / below the base, plus specks carried out stuck to dispensed pills">Escaped (this dispenser)</b><span id="r_dustEsc">—</span><b title="every dispenser in the bank added together (each one's dust is tracked while it runs and kept when another one is called)">All dispensers</b><span id="r_dustAll">—</span><b title="all dispensers, split by the pill material the dust came from (gel caps and softgels do not powder)">By pill type</b><span id="r_dustType">—</span></div>
 <div class="row"><label for="dustShow" title="draw the dust as it is shed (1 speck per 100 ng); specks settle at ~15 mm/s onto the first surface below and stay (the newest 20 000 are kept); specks on a belt ride with it">Show dust</label><input type="checkbox" id="dustShow" checked style="justify-self:start"></div>
 <div class="kv"><b title="largest share of a pill's belt contact covered by dust this step">Belt dust film</b><span id="r_dustTh"></span></div>
 <div class="row"><label for="dustTack" title="dust that settles on the belts covers part of the foam: covered area loses the foam's tack and grips at ~35% of clean foam (powder lubricates). Pills pressed into the foam pick some dust back up">Dust lowers belt grip</label><input type="checkbox" id="dustTack" checked style="justify-self:start"></div>
@@ -934,7 +935,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const perim = 2 * Lc + TAU * Rmid, dq = 1e-3, nq = Math.round(perim / dq), nvc = 8;
     const mk = () => [new Float32Array(nq * nvc), new Float32Array(nq * nvc)];
     sim.cells = { nq, nv: nvc, dq, perim, perm: mk(), vis: mk(), dent: mk(), dust: mk(), touched: [new Uint8Array(nq * nvc), new Uint8Array(nq * nvc)] };
-    sim.stats = { dust: 0, dustBy: [0, 0, 0], exits: [], dispensed: 0, meanEps: 0, maxEps: 0, contacts: 0, nanFlag: false, lost: 0, powerAcc: 0 };
+    sim.stats = { dust: 0, dustBy: [0, 0, 0], dustEsc: 0, dustT: {}, exits: [], dispensed: 0, meanEps: 0, maxEps: 0, contacts: 0, nanFlag: false, lost: 0, powerAcc: 0 };
     sim.rand = rng(opts.seed || 12345);
     sim.setPillSpec = function (spec) { sim.pillSpec = normSpec(spec); sim.pillType = makePillType(sim.pillSpec); return sim.pillType; };
     sim.setPillSpec(opts.pill || {});
@@ -955,15 +956,15 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         C.outN = C.exitN; C.held = 0; C.snap = false; C.snapPend = false; C.s2q.length = 0; C.closeAt = null; C.awaitClear = false; C.awaitS3 = null; C.s3cur = null; C.p1q.length = 0; if (C.state === 'clearing') C.state = 'idle'; C.reject = null;   /* new / cleared lot */ if (C.state === 'release') C.state = 'idle'; }   // the pills that were on their way are gone
       if (sim.dustFx) { const t = sim.dustFx.t; for (let k = 0; k < t.length; k++) if (t[k] >= 0) t[k] -= T0; }
       if (sim.stats.sqPkT != null) sim.stats.sqPkT = sh(sim.stats.sqPkT); };
-    sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.delivered = 0; sim.stats.escaped = 0; sim.stats.gateOpenS = 0; if (clearFoam) sim.resetFoam(); };
+    sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.dustEsc = 0; sim.stats.dustT = {}; sim.stats.delivered = 0; sim.stats.escaped = 0; sim.stats.gateOpenS = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); sim.cells.dust[b].fill(0); } sim.wearT = 0; };
     { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; sim.floorZ0 = sim.floorZ; }   // pills leave the model 5 mm below the lowest shell surface
-    sim.dustFx = { cap: 20000, head: 0, rs: 12345, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000) };
+    sim.dustFx = { cap: 20000, head: 0, rs: 12345, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000), ty: new Uint8Array(20000) };
     sim.addPills = function (n, region) { return addPills(sim, n, region); };
     sim.setExtraParts = function (list) { return setExtraParts(sim, list); };
     sim.setSingulator = function (o) { const old = sim.sing; sim.sing = singFrame(sim, o); if (sim.sing && old) { sim.sing.hits = old.hits; sim.sing.Fpk = old.Fpk; } sim.singOpts = o ? Object.assign({}, o) : null; return sim.sing; };
     if (opts.singulator) sim.setSingulator(opts.singulator);
-    sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) stepOnce(sim); };
+    sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) { stepOnce(sim); if (sim.dustFx && sim.t - (sim._dU ?? -1) >= 2e-3) { dustUpdate(sim); sim._dU = sim.t; } } };
     sim.beltSpeed = () => P.rpm * TAU / 60 * P.driveRadius;
     sim.nipGap = function () {
       const tb = tables; let mxb = 0; for (let j = 0; j < tb.nth; j++) for (let i = 0; i < tb.nu; i++) mxb = Math.max(mxb, tb.Bp[j * tb.nu + i] - Rb);
@@ -1293,6 +1294,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function addDust(sim, B, i, E, x, y, z, where, belt, cell) {
     const fri = B.type[i].spec.fri; if (!(fri > 0)) return;
     const dm = fri * DUST_KAPPA * E, st = sim.stats; B.dm[i] += dm; st.dust += dm; st.dustBy[where] += dm;
+    const mat = B.type[i].spec.mat || 'pressed', T = st.dustT || (st.dustT = {}); (T[mat] || (T[mat] = { shed: 0, esc: 0 })).shed += dm;
     if (belt >= 0) sim.cells.dust[belt][cell] += dm;
     const D = sim.dustFx; if (!D) return; D.acc += dm;
     while (D.acc >= D.per) { D.acc -= D.per; const k = D.head; D.head = (D.head + 1) % D.cap;
@@ -1300,7 +1302,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       let cx = x, cy = y, cz = z; const ks = dustAgg(sim); D.rs = (D.rs * 1664525 + 1013904223) >>> 0;
       if (ks > 0 && D.rs / 4294967296 < Math.min(0.9, 0.6 * ks)) { for (let j = 1; j <= 48; j++) { const m = (k - j + D.cap) % D.cap; if (D.t[m] < sim.t - 2) break;
         const ddx = D.x[m] - x, ddy = D.y[m] - y, ddz = D.z[m] - z; if (ddx * ddx + ddy * ddy + ddz * ddz < 9e-6) { const jj = (D.rs & 1023) / 1023 - 0.5; cx = D.x[m] + jj * 2e-4; cy = D.y[m] - jj * 2e-4; cz = D.z[m]; break; } } }
-      D.x[k] = cx; D.y[k] = cy; D.z[k] = cz; D.t[k] = sim.t; D.w[k] = where; }
+      D.x[k] = cx; D.y[k] = cy; D.z[k] = cz; D.t[k] = sim.t; D.w[k] = where; if (D.ty) D.ty[k] = dustMatIdx(sim, mat); }
   }
   /* ---- Pill-pass sensors + feed controller ------------------------------------------------------------------
      Each sensor is an IR beam of diameter beam_mm across the exit chute, below_mm down the chute (along the incline,
@@ -1677,7 +1679,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     return best;
   }
   function dustLand(sim, px, py, pz) {
-    let best = pz - (sim.floorZ || 0) + 0.01, hit = null, gate = false, mover = -1; const MV = dustMovers(sim);
+    const best0 = pz - (sim.floorZ || 0) + 0.01; let best = best0, hit = null, gate = false, mover = -1; const MV = dustMovers(sim);
     MV.forEach((m, i) => { const d = dustGateDown(sim, px, py, pz, best, m); if (d >= 0 && d < best) { best = d; gate = true; mover = i; } });
     for (const G of dustStatics(sim)) { const ci = Math.floor((px - G.mn[0]) / G.cell), cj = Math.floor((py - G.mn[1]) / G.cell);
       if (ci >= 0 && cj >= 0 && ci < G.dim[0] && cj < G.dim[1]) { const seen = new Set();
@@ -1700,7 +1702,63 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         else s = 2 * sim.Lc + PI * Rr + Rr * (PI - Math.atan2(u - Ut, a));
         hit = { belt: b, s, v: v0 - te * EV[2] }; gate = false; mover = -1; }
     }
-    return { d: best, belt: hit ? hit.belt : -1, s: hit ? hit.s : 0, v: hit ? hit.v : 0, gate, mover: gate ? MV[mover] : null };
+    // out: nothing below the speck inside the model -- it falls out of the dispenser (or lands below its base)
+    const out = best >= best0 - 1e-12 || pz - best < (sim.floorZ0 == null ? sim.floorZ || 0 : sim.floorZ0) + 5e-3 - 1e-4;
+    return { d: best, belt: hit ? hit.belt : -1, s: hit ? hit.s : 0, v: hit ? hit.v : 0, gate, mover: gate ? MV[mover] : null, out };
+  }
+  function dustMatIdx(sim, mat) { const L = sim.dustMats || (sim.dustMats = []); let i = L.indexOf(mat); if (i < 0) { L.push(mat); i = L.length - 1; } return i; }
+  /* Dust specks, advanced with the simulation (every 2 ms of sim time) so the escape count does not depend on drawing.
+     Each speck stands for D.per kg. Modes: 0 first fall, 1 riding a sliding gate, 2 falling again, 3 resting, 4 riding
+     a belt, 5 stuck to a pill, 6 gone. A speck ESCAPES the dispenser when it falls with nothing under it inside the model
+     (out through the drop hole / below the base) or rides out on a pill that leaves the model; escaped mass is counted
+     in sim.stats.dustEsc and per source pill material in sim.stats.dustT[mat].esc. */
+  function dustUpdate(sim) {
+    const D = sim.dustFx; if (!D) return; const cap = D.cap, now = sim.t, vs = 15e-3, st = sim.stats;
+    if (!D.md) Object.assign(D, { md: new Int8Array(cap), g: new Int8Array(cap), b: new Int8Array(cap), s: new Float32Array(cap), v: new Float32Array(cap), S0: new Float64Array(cap), d: new Float64Array(cap), out: new Uint8Array(cap),
+      px: new Float64Array(cap), py: new Float64Array(cap), pz: new Float64Array(cap), ly: new Float64Array(cap), ot: new Float64Array(cap), zp: new Float64Array(cap), pi: new Int32Array(cap), pid: new Float64Array(cap), lx: new Float64Array(cap * 3),
+      tk: new Float64Array(cap).fill(-1e9), cx: new Float32Array(cap), cy: new Float32Array(cap), cz: new Float32Array(cap), vis: new Uint8Array(cap), ty: D.ty || new Uint8Array(cap), p3: [0, 0, 0] });
+    const MV = dustMovers(sim), B = sim.bodies, Sx = sim.S || 0, mats = sim.dustMats || [];
+    const put = (k, x, y, z) => { D.cx[k] = x; D.cy[k] = y; D.cz[k] = z; D.vis[k] = 1; };
+    const escape = k => { D.md[k] = 6; D.vis[k] = 0; st.dustEsc = (st.dustEsc || 0) + D.per; const m = mats[D.ty[k]] || 'pressed', T = st.dustT || (st.dustT = {}); (T[m] || (T[m] = { shed: 0, esc: 0 })).esc += D.per; };
+    const mvIdx = m => m ? MV.indexOf(m) + 1 : 0;
+    const dropFrom = (k, x, y, z) => { const L = dustLand(sim, x, y, z - 1e-6); D.md[k] = 2; D.px[k] = x; D.py[k] = y; D.pz[k] = z; D.zp[k] = z; D.ot[k] = now; D.d[k] = L.d + 1e-6; D.g[k] = mvIdx(L.mover); D.b[k] = L.belt; D.s[k] = L.s; D.v[k] = L.v; D.S0[k] = NaN; D.out[k] = L.out ? 1 : 0; };
+    const onGate = (k, x, y, z, g) => { const m = MV[g - 1], d = m ? dustGateDown(sim, x, y, z + 2e-5, 4e-4, m) : -1; if (d < 0) { dropFrom(k, x, y, z); return; } D.md[k] = 1; D.g[k] = g; D.px[k] = x; D.py[k] = y; D.pz[k] = z + 2e-5 - d; D.ly[k] = y - m.off; };
+    const landed = k => { if (D.g[k]) onGate(k, D.px[k], D.py[k], D.pz[k] - D.d[k], D.g[k]); else if (D.out[k]) escape(k); else if (D.b[k] < 0) { D.md[k] = 3; D.pz[k] -= D.d[k]; } else D.md[k] = 4; };
+    // pills are solid: a falling speck that moves INTO a pill sticks to it (so a pill does not catch its own fresh dust)
+    const PL = []; for (let i = 0; i < B.n; i++) if (B.alive[i]) { const sp = B.type[i].spec; PL.push([i, 0.5e-3 * Math.max(sp.W || 0, sp.L || 0, sp.T || 0) + 1e-4]); }
+    const inPill = (i, x, y, z, out) => { const sp = B.type[i].spec, w = B.q[i * 4], qx = B.q[i * 4 + 1], qy = B.q[i * 4 + 2], qz = B.q[i * 4 + 3], dx = (x - B.px[i]) * 1e3, dy = (y - B.py[i]) * 1e3, dz = (z - B.pz[i]) * 1e3;
+      const lx = (1 - 2 * (qy * qy + qz * qz)) * dx + 2 * (qx * qy + w * qz) * dy + 2 * (qx * qz - w * qy) * dz, ly = 2 * (qx * qy - w * qz) * dx + (1 - 2 * (qx * qx + qz * qz)) * dy + 2 * (qy * qz + w * qx) * dz, lz = 2 * (qx * qz + w * qy) * dx + 2 * (qy * qz - w * qx) * dy + (1 - 2 * (qx * qx + qy * qy)) * dz, mg = 0.05; let ins;
+      if (sp.shape === 'tablet') ins = Math.abs(lz) <= sp.T / 2 + mg && lx * lx + ly * ly <= (sp.W / 2 + mg) ** 2;
+      else if (sp.shape === 'sphere') ins = lx * lx + ly * ly + lz * lz <= (sp.W / 2 + mg) ** 2;
+      else if (sp.shape === 'ellipsoid') ins = (lx / (sp.L / 2 + mg)) ** 2 + (ly / (sp.W / 2 + mg)) ** 2 + (lz / ((sp.T || sp.W) / 2 + mg)) ** 2 <= 1;
+      else { const r = sp.W / 2, hs = Math.max(sp.L / 2 - r, 0), c = Math.max(-hs, Math.min(hs, lx)); ins = (lx - c) ** 2 + ly * ly + lz * lz <= (r + mg) ** 2; }
+      if (ins && out) { out[0] = lx; out[1] = ly; out[2] = lz; } return ins; };
+    const lp = [0, 0, 0], catchPill = (k, x, y, z) => { const zq = D.zp[k]; D.zp[k] = z; for (const [i, rb] of PL) { const ex = x - B.px[i], ey = y - B.py[i], ez = z - B.pz[i]; if (ex * ex + ey * ey + ez * ez > rb * rb) continue;
+        if (inPill(i, x, y, z, lp) && !inPill(i, x, y, zq, null)) { D.md[k] = 5; D.pi[k] = i; D.pid[k] = B.id[i]; D.lx[k * 3] = lp[0]; D.lx[k * 3 + 1] = lp[1]; D.lx[k * 3 + 2] = lp[2]; D.px[k] = x; D.py[k] = y; D.pz[k] = z; return true; } } return false; };
+    for (let k = 0; k < cap; k++) { const t0 = D.t[k]; if (t0 < 0 || t0 > now) { D.vis[k] = 0; continue; }
+      if (D.tk[k] !== t0) { const L = dustLand(sim, D.x[k], D.y[k], D.z[k]); D.tk[k] = t0; D.d[k] = L.d; D.b[k] = L.belt; D.s[k] = L.s; D.v[k] = L.v; D.S0[k] = NaN; D.g[k] = mvIdx(L.mover); D.out[k] = L.out ? 1 : 0; D.md[k] = 0; D.zp[k] = D.z[k]; D.px[k] = D.x[k]; D.py[k] = D.y[k]; D.pz[k] = D.z[k]; D.ot[k] = t0; D.md[k] = 2; }
+      let md = D.md[k];
+      if (md === 6) { D.vis[k] = 0; continue; }
+      if (md === 2) { const f = (now - D.ot[k]) * vs;
+        if (f < D.d[k]) { if (!catchPill(k, D.px[k], D.py[k], D.pz[k] - f)) { put(k, D.px[k], D.py[k], D.pz[k] - f); continue; } }
+        else landed(k);
+        md = D.md[k]; }
+      if (md === 5) { const i = D.pi[k];
+        if (i >= B.n || !B.alive[i] || B.id[i] !== D.pid[k]) { escape(k); continue; }   // rode out of the model on the pill
+        const w = B.q[i * 4], qx = B.q[i * 4 + 1], qy = B.q[i * 4 + 2], qz = B.q[i * 4 + 3], lx = D.lx[k * 3], ly = D.lx[k * 3 + 1], lz = D.lx[k * 3 + 2];
+        D.px[k] = B.px[i] + 1e-3 * ((1 - 2 * (qy * qy + qz * qz)) * lx + 2 * (qx * qy - w * qz) * ly + 2 * (qx * qz + w * qy) * lz);
+        D.py[k] = B.py[i] + 1e-3 * (2 * (qx * qy + w * qz) * lx + (1 - 2 * (qx * qx + qz * qz)) * ly + 2 * (qy * qz - w * qx) * lz);
+        D.pz[k] = B.pz[i] + 1e-3 * (2 * (qx * qz - w * qy) * lx + 2 * (qy * qz + w * qx) * ly + (1 - 2 * (qx * qx + qy * qy)) * lz);
+        put(k, D.px[k], D.py[k], D.pz[k]); continue; }
+      if (md === 1) { const m = MV[D.g[k] - 1]; if (!m) { dropFrom(k, D.px[k], D.py[k], D.pz[k]); put(k, D.px[k], D.py[k], D.pz[k]); continue; }
+        const x = D.px[k], z = D.pz[k], tgt = D.ly[k] + m.off, dy = tgt - D.py[k], r = 3e-6 + ((k * 2654435761) % 1000) * 3e-8;
+        if (Math.abs(dy) > 1e-8) { const sg = dy > 0 ? 1 : -1, hit = dustRayY(sim, x, D.py[k], z + r, sg, Math.abs(dy), m);
+          if (hit >= 0) { D.py[k] += sg * Math.max(0, hit - 2e-6); D.ly[k] = D.py[k] - m.off; } else D.py[k] = tgt; }
+        if (dustGateDown(sim, x, D.py[k], z + 2e-5, 4e-4, m) < 0) dropFrom(k, x, D.py[k], z);
+        put(k, x, D.py[k], z); continue; }
+      if (md === 3) { put(k, D.px[k], D.py[k], D.pz[k]); continue; }
+      if (md === 4) { if (Number.isNaN(D.S0[k])) D.S0[k] = Sx; beltPoint(sim, D.b[k], D.s[k] + (Sx - D.S0[k]), D.v[k], D.p3); put(k, D.p3[0], D.p3[1], D.p3[2]); continue; }
+    }
   }
   function beltPoint(sim, b, s, v, out) {   // inverse of the belt arc map: world point on the foam surface
     const Rr = sim.Rb + sim.P.thickness, Lc = sim.Lc, per = 2 * Lc + TAU * Rr, U0 = sim.U0, Ut = U0 + Lc; s = ((s % per) + per) % per; let a, u;
@@ -2050,7 +2108,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, rayTri, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, rayTri, dustUpdate, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -2071,9 +2129,11 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 
   function simGeom() { return { uBot: S.geom.bot, uTop: FFx.GEOM0.uTop + S.geom.top, W: S.geom.W }; }
   function newSim() {
+    try { dustLedgerTick(); } catch (e) {}   // before startup the bank does not exist yet
     if (typeof TEX !== 'undefined') TEX.W = S.geom.W * 1e-3;
     sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, params: { rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
     applyParams();
+    if (typeof dustStaticTris !== 'undefined' && dustStaticTris) sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3));
     if (typeof idleBeltDirty !== 'undefined') idleBeltDirty = true;   // re-freeze the idle belts from the new geometry
     sim.addPills(S.count);
     buildPillMesh();
@@ -2365,66 +2425,12 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       for (const p of XP) if (p.mesh) { const c = p.col, col = [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16) / 255); if (p.alpha < 0.99) { gl.enable(gl.BLEND); gl.depthMask(false); draw(p.mesh, Mx, col, p.alpha, true); gl.depthMask(true); } else draw(p.mesh, Mx, col, 1, true); } gl.disable(gl.BLEND); }
     // dust specks: each falls straight down at a settling speed (~15 mm/s) from where it was shed, lands on the first
     // surface below (wall, plate, hopper, glass or belt -- FFx.dustLand) and sticks; specks on a belt ride with it
-    if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx, now = sim.t, vs = 15e-3; let n = 0;
-      if (!dustGL || dustGL.cap !== Dx.cap) { dustGL = { cap: Dx.cap, buf: new Float32Array(Dx.cap * 3), tk: new Float32Array(Dx.cap).fill(-1e9), d: new Float32Array(Dx.cap), b: new Int8Array(Dx.cap), s: new Float32Array(Dx.cap), v: new Float32Array(Dx.cap), S0: new Float64Array(Dx.cap), g: new Int8Array(Dx.cap), md: new Int8Array(Dx.cap), px: new Float64Array(Dx.cap), py: new Float64Array(Dx.cap), pz: new Float64Array(Dx.cap), ly: new Float64Array(Dx.cap), ot: new Float64Array(Dx.cap), zp: new Float64Array(Dx.cap), pi: new Int32Array(Dx.cap), pid: new Float64Array(Dx.cap), lx: new Float64Array(Dx.cap * 3), vao: gl.createVertexArray(), pb: gl.createBuffer(), p: [0, 0, 0] }; gl.bindVertexArray(dustGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, dustGL.pb); gl.bufferData(gl.ARRAY_BUFFER, dustGL.buf.byteLength, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
-      if (dustGL.sim !== sim) { dustGL.sim = sim; dustGL.tk.fill(-1e9); }
-      const Gd = dustGL, Sx = sim.S || 0;
-      /* specks that land on the pill-width safety gate ride on it (fine powder sticks). As it slides, a speck is carried
-         until something static is in its way at its own height (speck radius 3-33 um above the gate top): then it is held
-         against that wall while the gate slides on under it. Where the wall stands higher above the gate than the speck,
-         the speck passes underneath with the gate into the space behind; when the gate comes back that side of the wall
-         holds it, so it ends up beyond the wall. A speck left with no gate under it (hole, edge) falls again. */
-      if (!sim.dustGrid && dustStaticTris) sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3));
-      const MV = FFx.dustMovers(sim), put3 = (k, x, y, z) => { const o = n * 3; Gd.buf[o] = x * 1e3; Gd.buf[o + 1] = y * 1e3; Gd.buf[o + 2] = z * 1e3; n++; };
-      const mvIdx = m => m ? MV.indexOf(m) + 1 : 0;
-      // pills are solid too: a falling speck that meets a pill sticks to it and rides with it (pill frame), and falls again
-      // from where it was if that pill leaves the simulation
-      const Bp = sim.bodies, PL = []; for (let i = 0; i < Bp.n; i++) if (Bp.alive[i]) { const sp = Bp.type[i].spec, rb = 0.5e-3 * Math.max(sp.W || 0, sp.L || 0, sp.T || 0) + 1e-4; PL.push([i, rb]); }
-      const inPill = (i, x, y, z, out) => { const sp = Bp.type[i].spec, w = Bp.q[i * 4], qx = Bp.q[i * 4 + 1], qy = Bp.q[i * 4 + 2], qz = Bp.q[i * 4 + 3], dx = (x - Bp.px[i]) * 1e3, dy = (y - Bp.py[i]) * 1e3, dz = (z - Bp.pz[i]) * 1e3;
-        // local = R^T d
-        const r00 = 1 - 2 * (qy * qy + qz * qz), r01 = 2 * (qx * qy - w * qz), r02 = 2 * (qx * qz + w * qy), r10 = 2 * (qx * qy + w * qz), r11 = 1 - 2 * (qx * qx + qz * qz), r12 = 2 * (qy * qz - w * qx), r20 = 2 * (qx * qz - w * qy), r21 = 2 * (qy * qz + w * qx), r22 = 1 - 2 * (qx * qx + qy * qy);
-        const lx = r00 * dx + r10 * dy + r20 * dz, ly = r01 * dx + r11 * dy + r21 * dz, lz = r02 * dx + r12 * dy + r22 * dz, m = 0.05; let ins;
-        if (sp.shape === 'tablet') ins = Math.abs(lz) <= sp.T / 2 + m && lx * lx + ly * ly <= (sp.W / 2 + m) ** 2;
-        else if (sp.shape === 'sphere') ins = lx * lx + ly * ly + lz * lz <= (sp.W / 2 + m) ** 2;
-        else if (sp.shape === 'ellipsoid') ins = (lx / (sp.L / 2 + m)) ** 2 + (ly / (sp.W / 2 + m)) ** 2 + (lz / ((sp.T || sp.W) / 2 + m)) ** 2 <= 1;
-        else { const r = sp.W / 2, hs = Math.max(sp.L / 2 - r, 0), cx = Math.max(-hs, Math.min(hs, lx)); ins = (lx - cx) ** 2 + ly * ly + lz * lz <= (r + m) ** 2; }
-        if (ins && out) { out[0] = lx; out[1] = ly; out[2] = lz; } return ins; };
-      // only a pill the speck moves INTO (outside it last frame) catches it, so a speck is not caught by the pill it was shed from
-      const lp = [0, 0, 0], catchPill = (k, x, y, z) => { const zq = Gd.zp[k]; Gd.zp[k] = z; for (const [i, rb] of PL) { const ex = x - Bp.px[i], ey = y - Bp.py[i], ez = z - Bp.pz[i]; if (ex * ex + ey * ey + ez * ez > rb * rb) continue;
-          if (inPill(i, x, y, z, lp) && !inPill(i, x, y, zq, null)) { Gd.md[k] = 5; Gd.pi[k] = i; Gd.pid[k] = Bp.id[i]; Gd.lx[k * 3] = lp[0]; Gd.lx[k * 3 + 1] = lp[1]; Gd.lx[k * 3 + 2] = lp[2]; Gd.px[k] = x; Gd.py[k] = y; Gd.pz[k] = z; return true; } } return false; };
-      const dropFrom = (k, x, y, z) => { const L = FFx.dustLand(sim, x, y, z - 1e-6); Gd.md[k] = 2; Gd.px[k] = x; Gd.py[k] = y; Gd.pz[k] = z; Gd.zp[k] = z; Gd.ot[k] = now; Gd.d[k] = L.d + 1e-6; Gd.g[k] = mvIdx(L.mover); Gd.b[k] = L.belt; Gd.s[k] = L.s; Gd.v[k] = L.v; Gd.S0[k] = NaN; };
-      // land on sliding part #g (1-based in MV); if it is no longer under the speck, keep falling
-      const onGate = (k, x, y, z, g) => { const m = MV[g - 1], d = m ? FFx.dustGateDown(sim, x, y, z + 2e-5, 4e-4, m) : -1; if (d < 0) { dropFrom(k, x, y, z); return; } Gd.md[k] = 1; Gd.g[k] = g; Gd.px[k] = x; Gd.py[k] = y; Gd.pz[k] = z + 2e-5 - d; Gd.ly[k] = y - m.off; };
-      for (let k = 0; k < Dx.cap; k++) { const t0 = Dx.t[k]; if (t0 < 0 || t0 > now) continue;
-        if (Gd.tk[k] !== t0) { const L = FFx.dustLand(sim, Dx.x[k], Dx.y[k], Dx.z[k]); Gd.tk[k] = t0; Gd.d[k] = L.d; Gd.b[k] = L.belt; Gd.s[k] = L.s; Gd.v[k] = L.v; Gd.S0[k] = NaN; Gd.g[k] = mvIdx(L.mover); Gd.md[k] = 0; Gd.zp[k] = Dx.z[k]; }
-        if (Gd.md[k] === 0 && Gd.g[k] && (now - t0) * vs >= Gd.d[k]) onGate(k, Dx.x[k], Dx.y[k], Dx.z[k] - Gd.d[k], Gd.g[k]);
-        if (Gd.md[k] === 0 && (now - t0) * vs < Gd.d[k] && catchPill(k, Dx.x[k], Dx.y[k], Dx.z[k] - (now - t0) * vs)) {}
-        if (Gd.md[k] === 2) { const f = (now - Gd.ot[k]) * vs;
-          if (f < Gd.d[k] && !catchPill(k, Gd.px[k], Gd.py[k], Gd.pz[k] - f)) { put3(k, Gd.px[k], Gd.py[k], Gd.pz[k] - f); continue; }
-          if (Gd.md[k] === 2) {
-          if (Gd.g[k]) onGate(k, Gd.px[k], Gd.py[k], Gd.pz[k] - Gd.d[k], Gd.g[k]);
-          else if (Gd.b[k] < 0) { Gd.md[k] = 3; Gd.pz[k] -= Gd.d[k]; } else Gd.md[k] = 4; } }
-        if (Gd.md[k] === 5) { const i = Gd.pi[k];
-          if (i >= Bp.n || !Bp.alive[i] || Bp.id[i] !== Gd.pid[k]) { dropFrom(k, Gd.px[k], Gd.py[k], Gd.pz[k]); put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
-          const w = Bp.q[i * 4], qx = Bp.q[i * 4 + 1], qy = Bp.q[i * 4 + 2], qz = Bp.q[i * 4 + 3], lx = Gd.lx[k * 3], ly = Gd.lx[k * 3 + 1], lz = Gd.lx[k * 3 + 2];
-          Gd.px[k] = Bp.px[i] + 1e-3 * ((1 - 2 * (qy * qy + qz * qz)) * lx + 2 * (qx * qy - w * qz) * ly + 2 * (qx * qz + w * qy) * lz);
-          Gd.py[k] = Bp.py[i] + 1e-3 * (2 * (qx * qy + w * qz) * lx + (1 - 2 * (qx * qx + qz * qz)) * ly + 2 * (qy * qz - w * qx) * lz);
-          Gd.pz[k] = Bp.pz[i] + 1e-3 * (2 * (qx * qz - w * qy) * lx + 2 * (qy * qz + w * qx) * ly + (1 - 2 * (qx * qx + qy * qy)) * lz);
-          put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
-        if (Gd.md[k] === 1) { const m = MV[Gd.g[k] - 1]; if (!m) { dropFrom(k, Gd.px[k], Gd.py[k], Gd.pz[k]); put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
-          const x = Gd.px[k], z = Gd.pz[k], tgt = Gd.ly[k] + m.off, dy = tgt - Gd.py[k], r = 3e-6 + ((k * 2654435761) % 1000) * 3e-8;
-          if (Math.abs(dy) > 1e-8) { const sg = dy > 0 ? 1 : -1, hit = FFx.dustRayY(sim, x, Gd.py[k], z + r, sg, Math.abs(dy), m);
-            if (hit >= 0) { Gd.py[k] += sg * Math.max(0, hit - 2e-6); Gd.ly[k] = Gd.py[k] - m.off; } else Gd.py[k] = tgt; }
-          if (FFx.dustGateDown(sim, x, Gd.py[k], z + 2e-5, 4e-4, m) < 0) dropFrom(k, x, Gd.py[k], z);
-          if (Gd.md[k] === 2) { put3(k, x, Gd.py[k], z); continue; }
-          put3(k, x, Gd.py[k], Gd.pz[k]); continue; }
-        if (Gd.md[k] === 3) { if (Gd.pz[k] >= 0) put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
-        if (Gd.md[k] === 4) { const o = n * 3; if (Number.isNaN(Gd.S0[k])) Gd.S0[k] = Sx; FFx.beltPoint(sim, Gd.b[k], Gd.s[k] + (Sx - Gd.S0[k]), Gd.v[k], Gd.p); Gd.buf[o] = Gd.p[0] * 1e3; Gd.buf[o + 1] = Gd.p[1] * 1e3; Gd.buf[o + 2] = Gd.p[2] * 1e3; n++; continue; }
-        const fall = (now - t0) * vs, o = n * 3;
-        if (fall < Gd.d[k] || Gd.b[k] < 0) { if (Dx.z[k] - Math.min(fall, Gd.d[k]) < 0) continue;   // fell out of the bottom of the model
-          Gd.buf[o] = Dx.x[k] * 1e3; Gd.buf[o + 1] = Dx.y[k] * 1e3; Gd.buf[o + 2] = (Dx.z[k] - Math.min(fall, Gd.d[k])) * 1e3; n++; continue; }
-        if (Number.isNaN(Gd.S0[k])) Gd.S0[k] = Sx;
-        FFx.beltPoint(sim, Gd.b[k], Gd.s[k] + (Sx - Gd.S0[k]), Gd.v[k], Gd.p); Gd.buf[o] = Gd.p[0] * 1e3; Gd.buf[o + 1] = Gd.p[1] * 1e3; Gd.buf[o + 2] = Gd.p[2] * 1e3; n++; }
+    // dust specks: advanced by the engine (FFx.dustUpdate, every 2 ms of sim time); drawn where it left them
+    if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx; let n = 0;
+      if (!sim.dustGrid && dustStaticTris) { sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3)); }
+      if (!Dx.md) FFx.dustUpdate(sim);
+      if (!dustGL || dustGL.cap !== Dx.cap) { dustGL = { cap: Dx.cap, buf: new Float32Array(Dx.cap * 3), vao: gl.createVertexArray(), pb: gl.createBuffer() }; gl.bindVertexArray(dustGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, dustGL.pb); gl.bufferData(gl.ARRAY_BUFFER, dustGL.buf.byteLength, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
+      const Gd = dustGL; for (let k = 0; k < Dx.cap; k++) if (Dx.vis[k]) { const o = n * 3; Gd.buf[o] = Dx.cx[k] * 1e3; Gd.buf[o + 1] = Dx.cy[k] * 1e3; Gd.buf[o + 2] = Dx.cz[k] * 1e3; n++; }
       if (n) { gl.bindVertexArray(dustGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, dustGL.pb); gl.bufferSubData(gl.ARRAY_BUFFER, 0, dustGL.buf, 0, n * 3);
         gl.uniformMatrix4fv(U.uM, false, I); gl.uniform3fv(U.uCol, [0.93, 0.92, 0.86]); gl.uniform1i(U.uUseCol, 0); gl.uniform1i(U.uPat, 0); gl.uniform1f(U.uAlpha, 0.85); gl.uniform1i(U.uFlat, 0);
         gl.vertexAttrib3f(A.nrm, 0, 0, 1); gl.drawArrays(gl.POINTS, 0, n); gl.bindVertexArray(null); } }
@@ -2523,6 +2529,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       let wi = -1, wf = 0; for (let i = 0; i < B.n; i++) { const f = B.dm[i] / B.type[i].mass; if (f > wf) { wf = f; wi = i; } }
       $('r_dust').textContent = !(fri > 0) && !st.dust ? 'none (this pill does not powder)' : `${m(st.dust)} total · ${m(st.dust / Math.max(sim.t, 1e-6) * 60)}/min`;
       $('r_dustPP').textContent = st.dispensed ? m(st.dust / st.dispensed) : '—';
+      dustLedgerTick();
+      { const mz = x => x > 0 ? m(x) : '0', pc = (a, b) => b > 0 ? ` (${fmt(a / b * 100, a / b < 0.01 ? 2 : 1)}% of shed)` : '', lab = k => (FFx.PILL_MATS[k] && FFx.PILL_MATS[k].label) || k;
+        const L = BANK.units[BANK.cur] && BANK.units[BANK.cur].dustL || { shed: 0, esc: 0, T: {} };
+        $('r_dustEsc').textContent = `${mz(L.esc)}${pc(L.esc, L.shed)} · this run ${mz(st.dustEsc || 0)}`;
+        let sh = 0, es = 0, run = 0; const T = {}; for (let k = 0; k < BANK.n; k++) { const u = BANK.units[k], d = u && u.dustL; if (!d) continue; if (d.shed > 0 || d.esc > 0) run++; sh += d.shed; es += d.esc; for (const [mt, v] of Object.entries(d.T)) { const a = T[mt] || (T[mt] = { shed: 0, esc: 0, n: 0 }); a.shed += v.shed; a.esc += v.esc; } }
+        for (let k = 0; k < BANK.n; k++) { const u = BANK.units[k], mt = (k === BANK.cur ? S.pill : u.pill).mat || 'pressed'; (T[mt] || (T[mt] = { shed: 0, esc: 0, n: 0 })).n++; }
+        $('r_dustAll').textContent = `${BANK.n} dispenser${BANK.n === 1 ? '' : 's'} · shed ${mz(sh)} · escaped ${mz(es)}${pc(es, sh)}`;
+        $('r_dustType').textContent = Object.entries(T).map(([mt, v]) => `${lab(mt)} ×${v.n}: ` + (v.shed > 0 ? `shed ${mz(v.shed)}, escaped ${mz(v.esc)}` : (FFx.PILL_MATS[mt] && !(FFx.PILL_MATS[mt].fri > 0) ? 'no dust (does not powder)' : 'none yet'))).join(' · ') || '—'; }
       { const K = sim.sing; $('r_sing').textContent = K ? `${K.hits ? 'pill touching it' : 'no contact'} · peak push ${fmt(K.Fpk, 2)} N` : 'off'; if (K) K.hits = 0; }
       { const th = st.dustTh || 0; st.dustTh = 0; $('r_dustTh').textContent = sim.P.dustTack > 0 ? (th > 0 ? `${fmt(th * 100, th < 0.01 ? 3 : 1)}% of the contact covered → grip −${fmt(th * 65, th < 0.01 ? 3 : 1)}%, tack −${fmt(th * 100, th < 0.01 ? 3 : 1)}%` : 'clean') : 'ignored'; }
       $('r_dustW').textContent = st.dust > 0 ? `belts ${fmt(st.dustBy[0] / st.dust * 100, 0)}% · pile ${fmt(st.dustBy[1] / st.dust * 100, 0)}% · walls ${fmt(st.dustBy[2] / st.dust * 100, 0)}%` : '—';
@@ -2754,7 +2768,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('crushN').onchange = () => { const v = +$('crushN').value; S.crushN = v > 0 ? v : null; };
   $('loadCol').onchange = () => { S.loadCol = $('loadCol').checked; };
   $('dustShow').onchange = () => { S.dustShow = $('dustShow').checked; };
-  $('btnDust').onclick = () => { const st = sim.stats; st.dust = 0; st.dustBy = [0, 0, 0]; sim.bodies.dm.fill(0); for (const b of [0, 1]) sim.cells.dust[b].fill(0); sim.dustFx.t.fill(-99); };
+  $('btnDust').onclick = () => { const st = sim.stats; st.dust = 0; st.dustBy = [0, 0, 0]; st.dustEsc = 0; st.dustT = {}; sim._dSeen = null; for (const u of BANK.units) u.dustL = null; if (sim.dustFx.md) sim.dustFx.md.fill(6); sim.bodies.dm.fill(0); for (const b of [0, 1]) sim.cells.dust[b].fill(0); sim.dustFx.t.fill(-99); };
   $('btnPeak').onclick = () => { sim.stats.sqPk = 0; sim.stats.prPk = 0; const B = sim.bodies; B.sqPk.fill(0); B.prPk.fill(0); };
   $('wearX').onchange = () => { S.wearX = +$('wearX').value; sim.P.wearX = S.wearX; };
   hook('rpm', v => { S.rpm = +v; applyParams(); });
@@ -3161,7 +3175,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function singUI() { const g = S.sing; $('sgOn').checked = !!g.on; $('sgAxis').value = g.axis; for (const [id, k] of [['sgU', 'u_mm'], ['sgX', 'x_mm'], ['sgV', 'v_mm'], ['sgLen', 'len_mm'], ['sgR', 'r_mm'], ['sgMu', 'mu']]) { $(id).value = g[k]; $(id + 'V').textContent = g[k]; } $('dustTack').checked = !!S.dustTack; $('dustStatic').value = S.dustStatic; $('dustStaticV').textContent = S.dustStatic; }
   /* ================================================================ dispenser bank */
   // per dispenser: medication label, pill, load size, and (while idle) a snapshot of the pills still inside it
-  const newUnit = k => { const p = JSON.parse(JSON.stringify(S.pill)); delete p.safety_push_mm; return { med: `Medication ${k + 1}`, pill: p, count: S.count, snap: null, out: 0 }; };   // a new dispenser starts on the auto safety-gate throw
+  const newUnit = k => { const p = JSON.parse(JSON.stringify(S.pill)); delete p.safety_push_mm; return { med: `Medication ${k + 1}`, pill: p, count: S.count, snap: null, out: 0, dustL: null }; };   // a new dispenser starts on the auto safety-gate throw
   function pillsLeft(k) { if (k === BANK.cur && sim) { const B = sim.bodies; let n = 0; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) n++; return n; } const u = BANK.units[k]; return u.snap ? u.snap.p.length : u.count; }
   function snapPills(sm) {   // pills still in the dispenser (not yet out): positions + orientation + colour, at rest
     const B = sm.bodies, p = []; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) p.push([B.px[i], B.py[i], B.pz[i], B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3], B.hue[i]]); return { p }; }
@@ -3175,6 +3189,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       for (let a = 0; a < 4; a++) B.q[k * 4 + a] = q[3 + a]; B.vx[k] = q[7]; B.vy[k] = q[8]; B.vz[k] = q[9]; B.wx[k] = q[10]; B.wy[k] = q[11]; B.wz[k] = q[12]; B.exitT[k] = 0; B.hue[k] = d.hue; if (B.hole) B.hole[k] = 1; } }
   function activate(k) {
     if (k === BANK.cur || k < 0 || k >= BANK.n) return;
+    dustLedgerTick();
     const old = BANK.units[BANK.cur], o0 = bankOff(BANK.cur), o1 = bankOff(k);
     old.snap = snapPills(sim); old.pill = JSON.parse(JSON.stringify(S.pill)); old.count = S.count; old.out += sim.stats.delivered || 0;
     const down = takeDownstream(sim, o0), wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) };
@@ -3187,6 +3202,12 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   }
   // a call: queued; served one at a time, each once the running dispenser has finished (controller idle, gate shut)
   function bankCall(k, n) { BANK.q.push({ k, n }); }
+  /* Dust ledger per dispenser: the running sim's dust totals are folded into its bank unit as they grow (and before the
+     sim is replaced), so every dispenser keeps its own shed / escaped mass, split by pill material. */
+  function dustLedgerTick() { if (!sim || !BANK.units.length) return; const u = BANK.units[BANK.cur]; if (!u) return; const st = sim.stats, L = u.dustL || (u.dustL = { shed: 0, esc: 0, T: {} });
+    const seen = sim._dSeen || (sim._dSeen = { shed: 0, esc: 0, T: {} }); if (st.dust < seen.shed - 1e-18 || (st.dustEsc || 0) < seen.esc - 1e-18) { seen.shed = 0; seen.esc = 0; seen.T = {}; }
+    L.shed += st.dust - seen.shed; L.esc += (st.dustEsc || 0) - seen.esc; seen.shed = st.dust; seen.esc = st.dustEsc || 0;
+    for (const [m, v] of Object.entries(st.dustT || {})) { const a = L.T[m] || (L.T[m] = { shed: 0, esc: 0 }), b = seen.T[m] || (seen.T[m] = { shed: 0, esc: 0 }); if (v.shed < b.shed || v.esc < b.esc) { b.shed = 0; b.esc = 0; } a.shed += v.shed - b.shed; a.esc += v.esc - b.esc; b.shed = v.shed; b.esc = v.esc; } }
   function bankStep() {
     if (!BANK.q.length || !sim) return; const C = sim.ctrl;
     const busy = C && (C.state !== 'idle' || C.queue > 0 || C.needs.length > 0 || C.awaitClear || C.awaitS3 != null || C.closeAt != null || (sim.gate && sim.gate.ang > (sim.gate.a0 || 0) + 1e-6));
@@ -3195,7 +3216,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function setBankN(n) { n = Math.max(1, Math.min(32, Math.round(n) || 1));
     while (BANK.units.length < n) BANK.units.push(newUnit(BANK.units.length));
     if (BANK.cur >= n) activate(0); BANK.n = n; BANK.q = BANK.q.filter(c => c.k < n); S.bank = bankSave(); bankUI(); fitAll(); }
-  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, BANK.n).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, out: u.out, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap })) }; }
+  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, BANK.n).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, out: u.out, dustL: u.dustL || null, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap })) }; }
   function bankLoad(b) { if (!b) return; BANK.cols = b.cols || 8; BANK.pitchX = b.pitchX || 50; BANK.pitchY = b.pitchY || 110; BANK.units = (b.units || []).map((u, k) => Object.assign(newUnit(k), u)); BANK.n = Math.max(1, Math.min(32, b.n || BANK.units.length || 1)); while (BANK.units.length < BANK.n) BANK.units.push(newUnit(BANK.units.length));
     BANK.cur = Math.min(b.cur || 0, BANK.n - 1); const u = BANK.units[BANK.cur]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; }
   const pillLabel = p => { const sh = { tablet: 'tablet', capsule: 'capsule', ellipsoid: 'softgel', sphere: 'bead' }[p.shape] || p.shape; return p.shape === 'tablet' || p.shape === 'sphere' ? `${sh} ${p.W} mm` : `${sh} ${p.L}×${p.W} mm`; };
