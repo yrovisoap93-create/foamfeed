@@ -2676,9 +2676,16 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     requestAnimationFrame(frame);
     if (pending && now > pending.at) { const p = pending; pending = null; p.fn(); }
     if (trial) { const t0 = performance.now(); while (performance.now() - t0 < 30 && sim.t < trial.T) sim.step(10); $('btnRun').textContent = `Running… ${fmt(sim.t, 0)}/${trial.T} s (click to stop)`; if (sim.t >= trial.T) finishTrial(); }
-    else if (!S.paused) {
-      const budget = 13, t0 = performance.now(), dt = sim.P.dt, want = Math.min(Math.round(S.speed / 60 / dt), 600); let done = 0;
+    else if (S.paused || trial) { frame.last = null; frame.acc = 0; }
+    if (!trial && !S.paused) {
+      // paced by wall-clock time, not frame count: sim time owed = Speed x real time since the last frame (so a 144/240 Hz
+      // display or a light scene can't run faster than the slider). If the physics can't keep up, the debt is capped at
+      // 0.1 s so it never tries to "catch up" in a burst; it just runs slower than the slider.
+      const dt = sim.P.dt, fel = frame.last == null ? 0 : Math.min(0.1, Math.max(0, (now - frame.last) / 1000)); frame.last = now;
+      frame.acc = Math.min((frame.acc || 0) + S.speed * fel, Math.max(S.speed * 0.1, dt));
+      const budget = 13, t0 = performance.now(), want = Math.floor(frame.acc / dt + 1e-9); let done = 0;
       while (done < want && performance.now() - t0 < budget) { const k = Math.min(10, want - done); sim.step(k); done += k; }
+      frame.acc = Math.max(0, frame.acc - done * dt);
       const el = (now - wallPrev) / 1000; if (el > 0.4) { rtf = (sim.t - simPrev) / el; wallPrev = now; simPrev = sim.t; }
     }
     render();
@@ -3344,7 +3351,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('bkPill').innerHTML = '<option value="">change pill…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
   $('bkPill').onchange = () => { const p = PILLS[$('bkPill').value]; if (!p) return; const sp = Object.assign({ L: p.W, T: p.W, edge: 0.8, mat: 'pressed' }, p); if (p.shape === 'tablet') sp.L = p.W;
     if (bankSel === BANK.cur) { delete S.pill.fri; delete S.pill.tack; Object.assign(S.pill, sp); syncUI(); later(rebuildPills, 50); } else { BANK.units[bankSel].pill = sp; BANK.units[bankSel].snap = null; } bankUI(); };
-  $('bkCount').onchange = () => { const n = Math.max(1, Math.min(150, +$('bkCount').value || 10)); if (bankSel === BANK.cur) { S.count = n; syncUI(); } else { BANK.units[bankSel].count = n; BANK.units[bankSel].snap = null; } bankUI(); };
+  $('bkCount').onchange = () => { const n = Math.max(1, Math.min(400, +$('bkCount').value || 10)); if (bankSel === BANK.cur) { S.count = n; syncUI(); } else { BANK.units[bankSel].count = n; BANK.units[bankSel].snap = null; } bankUI(); };
   $('bkRefill').onclick = () => { if (bankSel === BANK.cur) $('btnTrial').click(); else BANK.units[bankSel].snap = null; bankUI(); };
   // idle dispensers that were never run start full: settle their load once in a throw-away sim (a little each frame)
   let settleJob = null;
