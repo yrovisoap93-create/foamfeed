@@ -267,7 +267,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 <div class="row"><label for="pMuF" title="base coefficient; the foam grip factor and squeeze multiply it">Friction vs foam</label><input type="range" id="pMuF" min="0.05" max="2" step="0.05" value="0.6"><span class="v"><span id="pMuFV"></span></span></div>
 <div class="row"><label for="pMuH" title="pill-pill and pill-hopper friction">Friction vs hard</label><input type="range" id="pMuH" min="0.05" max="1" step="0.05" value="0.35"><span class="v"><span id="pMuHV"></span></span></div>
 <div class="row"><label for="pRest" title="">Bounciness</label><input type="range" id="pRest" min="0" max="0.9" step="0.05" value="0.35"><span class="v"><span id="pRestV"></span></span></div>
-<div class="row"><label for="count" title="">Pill count</label><input type="range" id="count" min="1" max="150" step="1" value="10"><span class="v"><span id="countV"></span></span></div>
+<div class="row"><label for="count" title="">Pill count</label><input type="range" id="count" min="1" max="400" step="1" value="10"><span class="v"><span id="countV"></span></span></div>
 <div class="btns"><button class="pri" id="btnTrial">Dump new load</button><button id="btnFill">Add pills</button><button id="btnClear">Clear</button></div>
 <small>Changing shape, size or density rebuilds the load; friction changes are live.</small>
 </aside>
@@ -616,8 +616,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     for (let t = 0; t < n; t++) for (let a = 0; a < 3; a++) { const x = tris[t * 9 + a], y = tris[t * 9 + 3 + a], z = tris[t * 9 + 6 + a]; bb[t * 6 + a] = Math.min(x, y, z); bb[t * 6 + 3 + a] = Math.max(x, y, z); }
     return { tris, n, mn, mx, dim, cell, cells, bb };
   }
+  const DUST_DT = 5e-3;   // dust specks are advanced every 5 ms of sim time (they fall ~0.08 mm per update)
+  const VL_SKIN = 1e-3, PP_SKIN = 0.25e-3;   // Verlet skins: static-wall lists, pill-pair lists (per pill, m)   // Verlet skin for the static-wall neighbour lists (m)
   const meffOf = (T, rx, ry, rz) => 1 / (1 / T.mass + (rx * rx + ry * ry + rz * rz) / T.Imin);
-  const zetaOf = (e) => e <= 0.02 ? 1 : -Math.log(e) / Math.sqrt(PI * PI + Math.log(e) ** 2);
+  const _zeta = new Map(), zetaOf = (e) => { let z = _zeta.get(e); if (z === undefined) { z = e <= 0.02 ? 1 : -Math.log(e) / Math.sqrt(PI * PI + Math.log(e) ** 2); _zeta.set(e, z); } return z; };
   const _cp = [0, 0, 0];
   function closestPtTri(px, py, pz, t, b, out) { // Ericson, Real-Time Collision Detection
     const ax = t[b], ay = t[b + 1], az = t[b + 2], bx = t[b + 3], by = t[b + 4], bz = t[b + 5], cx = t[b + 6], cy = t[b + 7], cz = t[b + 8];
@@ -964,7 +966,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     sim.setExtraParts = function (list) { return setExtraParts(sim, list); };
     sim.setSingulator = function (o) { const old = sim.sing; sim.sing = singFrame(sim, o); if (sim.sing && old) { sim.sing.hits = old.hits; sim.sing.Fpk = old.Fpk; } sim.singOpts = o ? Object.assign({}, o) : null; return sim.sing; };
     if (opts.singulator) sim.setSingulator(opts.singulator);
-    sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) { stepOnce(sim); if (sim.dustFx && sim.t - (sim._dU ?? -1) >= 2e-3) { dustUpdate(sim); sim._dU = sim.t; } } };
+    sim.step = function (nsteps) { for (let i = 0; i < nsteps; i++) { stepOnce(sim); if (sim.dustFx && sim.t - (sim._dU ?? -1) >= DUST_DT) { dustUpdate(sim); sim._dU = sim.t; } } };
     sim.beltSpeed = () => P.rpm * TAU / 60 * P.driveRadius;
     sim.nipGap = function () {
       const tb = tables; let mxb = 0; for (let j = 0; j < tb.nth; j++) for (let i = 0; i < tb.nu; i++) mxb = Math.max(mxb, tb.Bp[j * tb.nu + i] - Rb);
@@ -1707,7 +1709,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     return { d: best, belt: hit ? hit.belt : -1, s: hit ? hit.s : 0, v: hit ? hit.v : 0, gate, mover: gate ? MV[mover] : null, out };
   }
   function dustMatIdx(sim, mat) { const L = sim.dustMats || (sim.dustMats = []); let i = L.indexOf(mat); if (i < 0) { L.push(mat); i = L.length - 1; } return i; }
-  /* Dust specks, advanced with the simulation (every 2 ms of sim time) so the escape count does not depend on drawing.
+  /* Dust specks, advanced with the simulation (every 5 ms of sim time) so the escape count does not depend on drawing.
      Each speck stands for D.per kg. Modes: 0 first fall, 1 riding a sliding gate, 2 falling again, 3 resting, 4 riding
      a belt, 5 stuck to a pill, 6 gone. A speck ESCAPES the dispenser when it falls with nothing under it inside the model
      (out through the drop hole / below the base) or rides out on a pill that leaves the model; escaped mass is counted
@@ -1726,6 +1728,12 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const landed = k => { if (D.g[k]) onGate(k, D.px[k], D.py[k], D.pz[k] - D.d[k], D.g[k]); else if (D.out[k]) escape(k); else if (D.b[k] < 0) { D.md[k] = 3; D.pz[k] -= D.d[k]; } else D.md[k] = 4; };
     // pills are solid: a falling speck that moves INTO a pill sticks to it (so a pill does not catch its own fresh dust)
     const PL = []; for (let i = 0; i < B.n; i++) if (B.alive[i]) { const sp = B.type[i].spec; PL.push([i, 0.5e-3 * Math.max(sp.W || 0, sp.L || 0, sp.T || 0) + 1e-4]); }
+    // pills hashed into 12 mm cells (a pill sits in the cell of its centre; neighbours cover its reach), so a falling speck
+    // only tests the pills around it; candidates are taken in pill order, as a full scan would
+    let rbMax = 0; for (const e of PL) rbMax = Math.max(rbMax, e[1]);
+    const HC = Math.max(2 * rbMax, 1e-3), PH = new Map(), hk = (a, b, c) => (a * 4096 + b) * 4096 + c;
+    for (const e of PL) { const i = e[0]; const key = hk(Math.floor(B.px[i] / HC) + 2048, Math.floor(B.py[i] / HC) + 2048, Math.floor(B.pz[i] / HC) + 2048); let l = PH.get(key); if (!l) PH.set(key, l = []); l.push(e); }
+
     const inPill = (i, x, y, z, out) => { const sp = B.type[i].spec, w = B.q[i * 4], qx = B.q[i * 4 + 1], qy = B.q[i * 4 + 2], qz = B.q[i * 4 + 3], dx = (x - B.px[i]) * 1e3, dy = (y - B.py[i]) * 1e3, dz = (z - B.pz[i]) * 1e3;
       const lx = (1 - 2 * (qy * qy + qz * qz)) * dx + 2 * (qx * qy + w * qz) * dy + 2 * (qx * qz - w * qy) * dz, ly = 2 * (qx * qy - w * qz) * dx + (1 - 2 * (qx * qx + qz * qz)) * dy + 2 * (qy * qz + w * qx) * dz, lz = 2 * (qx * qz + w * qy) * dx + 2 * (qy * qz - w * qx) * dy + (1 - 2 * (qx * qx + qy * qy)) * dz, mg = 0.05; let ins;
       if (sp.shape === 'tablet') ins = Math.abs(lz) <= sp.T / 2 + mg && lx * lx + ly * ly <= (sp.W / 2 + mg) ** 2;
@@ -1733,8 +1741,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       else if (sp.shape === 'ellipsoid') ins = (lx / (sp.L / 2 + mg)) ** 2 + (ly / (sp.W / 2 + mg)) ** 2 + (lz / ((sp.T || sp.W) / 2 + mg)) ** 2 <= 1;
       else { const r = sp.W / 2, hs = Math.max(sp.L / 2 - r, 0), c = Math.max(-hs, Math.min(hs, lx)); ins = (lx - c) ** 2 + ly * ly + lz * lz <= (r + mg) ** 2; }
       if (ins && out) { out[0] = lx; out[1] = ly; out[2] = lz; } return ins; };
-    const lp = [0, 0, 0], catchPill = (k, x, y, z) => { const zq = D.zp[k]; D.zp[k] = z; for (const [i, rb] of PL) { const ex = x - B.px[i], ey = y - B.py[i], ez = z - B.pz[i]; if (ex * ex + ey * ey + ez * ez > rb * rb) continue;
-        if (inPill(i, x, y, z, lp) && !inPill(i, x, y, zq, null)) { D.md[k] = 5; D.pi[k] = i; D.pid[k] = B.id[i]; D.lx[k * 3] = lp[0]; D.lx[k * 3 + 1] = lp[1]; D.lx[k * 3 + 2] = lp[2]; D.px[k] = x; D.py[k] = y; D.pz[k] = z; return true; } } return false; };
+    const lp = [0, 0, 0], lb = [0, 0, 0], catchPill = (k, x, y, z) => { const zq = D.zp[k]; D.zp[k] = z; let best = -1;
+      // cells are 2 x the largest pill reach, so the pills that can hold this point sit in at most 2 cells per axis
+      const a0 = Math.floor((x - rbMax) / HC) + 2048, a1 = Math.floor((x + rbMax) / HC) + 2048, b0 = Math.floor((y - rbMax) / HC) + 2048, b1 = Math.floor((y + rbMax) / HC) + 2048, c0 = Math.floor((z - rbMax) / HC) + 2048, c1 = Math.floor((z + rbMax) / HC) + 2048;
+      for (let a = a0; a <= a1; a++) for (let b = b0; b <= b1; b++) for (let c = c0; c <= c1; c++) { const l = PH.get(hk(a, b, c)); if (!l) continue;
+        for (let q = 0; q < l.length; q++) { const i = l[q][0], rb = l[q][1]; if (best >= 0 && i > best) continue; const ex = x - B.px[i], ey = y - B.py[i], ez = z - B.pz[i]; if (ex * ex + ey * ey + ez * ez > rb * rb) continue;
+          if (inPill(i, x, y, z, lp) && !inPill(i, x, y, zq, null)) { best = i; lb[0] = lp[0]; lb[1] = lp[1]; lb[2] = lp[2]; } } }
+      if (best < 0) return false;   // the lowest-numbered pill that catches it, as a scan in pill order would pick
+      D.md[k] = 5; D.pi[k] = best; D.pid[k] = B.id[best]; D.lx[k * 3] = lb[0]; D.lx[k * 3 + 1] = lb[1]; D.lx[k * 3 + 2] = lb[2]; D.px[k] = x; D.py[k] = y; D.pz[k] = z; return true; };
     for (let k = 0; k < cap; k++) { const t0 = D.t[k]; if (t0 < 0 || t0 > now) { D.vis[k] = 0; continue; }
       if (D.tk[k] !== t0) { const L = dustLand(sim, D.x[k], D.y[k], D.z[k]); D.tk[k] = t0; D.d[k] = L.d; D.b[k] = L.belt; D.s[k] = L.s; D.v[k] = L.v; D.S0[k] = NaN; D.g[k] = mvIdx(L.mover); D.out[k] = L.out ? 1 : 0; D.md[k] = 0; D.zp[k] = D.z[k]; D.px[k] = D.x[k]; D.py[k] = D.y[k]; D.pz[k] = D.z[k]; D.ot[k] = t0; D.md[k] = 2; }
       let md = D.md[k];
@@ -1908,8 +1922,42 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   const _svx = new Float64Array(CAPS), _svy = new Float64Array(CAPS), _svz = new Float64Array(CAPS);
   let _nxt = new Int32Array(CAPS); const _key = new Int32Array(CAPS);
   let _head = new Int32Array(1 << 16).fill(-1);
+  /* Rest (sleeping, as Box2D / Bullet / PhysX put still bodies to sleep): when nothing drives the cartridge (belts stopped,
+     vibrator off, both gates still, controller idle) and no pill has drifted more than 10 um over a 0.2 s window, the pile is in equilibrium and the contact solve is skipped -- time, the gates, the controller, the foam's
+     dent recovery and the dust carry on. The first step anything drives it again (motor, vibrator, gate, a call, added or
+     removed pills) the full solve resumes from exactly the resting state. Engine default off (bench results unchanged);
+     the app turns it on (P.restSleep). */
+  function restCheck(sim) {
+    const P = sim.P, B = sim.bodies, R = sim.rest || (sim.rest = { still: 0, asleep: false, n: -1 }), C = sim.ctrl;
+    let alive = 0; for (let i = 0; i < B.n; i++) if (B.alive[i]) alive++;
+    const driven = P.rpm !== 0 || (P.vib && P.vib.on && sim.vibEnv !== 0) || (sim.gate && (sim.gate.vel !== 0 || Math.abs(sim.gate.ang - ((!sim.ctrl || sim.ctrl.mode !== 'feed' || sim.gate.open) ? sim.gate.travel : (sim.gate.a0 || 0))) > 1e-9)) || (sim.safety && (sim.safety.vel !== 0 || Math.abs(sim.safety.off - (sim.safety.open ? sim.safety.push : 0)) > 1e-9))
+      || (C && (C.state !== 'idle' || C.queue > 0 || (C.needs && C.needs.length > 0) || C.awaitClear || C.awaitS3 != null || C.closeAt != null)) || alive !== R.n;
+    R.n = alive;
+    if (driven || !P.restSleep) { R.asleep = false; R.still = 0; R.ref = null; return false; }
+    if (R.asleep) return true;
+    // still = over a 0.2 s window no pill has moved (or turned, times its radius) more than 10 um, i.e. mean drift under
+    // 0.05 mm/s, and none is moving faster than 2 mm/s right now. (Instantaneous speed alone never settles: the stiff
+    // contact springs keep a ~0.2 mm/s chatter at the contact frequency with no net motion.)
+    let fast = false; for (let i = 0; i < B.n && !fast; i++) if (B.alive[i] && (B.vx[i] * B.vx[i] + B.vy[i] * B.vy[i] + B.vz[i] * B.vz[i] > 4e-6 || B.wx[i] * B.wx[i] + B.wy[i] * B.wy[i] + B.wz[i] * B.wz[i] > 0.25)) fast = true;
+    if (fast) { R.still = 0; R.ref = null; return false; }
+    if (!R.ref) { R.ref = new Float64Array(B.n * 7); for (let i = 0; i < B.n; i++) { const o = i * 7; R.ref[o] = B.px[i]; R.ref[o + 1] = B.py[i]; R.ref[o + 2] = B.pz[i]; for (let j = 0; j < 4; j++) R.ref[o + 3 + j] = B.q[i * 4 + j]; } R.still = 0; return false; }
+    R.still += P.dt; if (R.still < 0.2) return false;
+    let moved = 0; for (let i = 0; i < B.n; i++) { if (!B.alive[i]) continue; const o = i * 7, dx = B.px[i] - R.ref[o], dy = B.py[i] - R.ref[o + 1], dz = B.pz[i] - R.ref[o + 2];
+      const cq = Math.min(1, Math.abs(B.q[i * 4] * R.ref[o + 3] + B.q[i * 4 + 1] * R.ref[o + 4] + B.q[i * 4 + 2] * R.ref[o + 5] + B.q[i * 4 + 3] * R.ref[o + 6]));
+      moved = Math.max(moved, Math.sqrt(dx * dx + dy * dy + dz * dz) + 2 * Math.acos(cq) * B.type[i].brad); }
+    R.ref = null; R.still = 0; sim.stats.restDrift = moved;
+    if (moved < 10e-6) { R.asleep = true; sim.stats.sleeps = (sim.stats.sleeps || 0) + 1; }
+    return R.asleep;
+  }
   function stepOnce(sim) {
     const P = sim.P, B = sim.bodies, dt = P.dt, n = B.n;
+    if (P.restSleep && restCheck(sim)) {   // at rest: advance everything except the (unchanging) contact solve
+      if (sim.gate) { if (!sim.ctrl || sim.ctrl.mode !== 'feed') sim.gate.open = true; gateStep(sim, dt); } if (sim.safety) safetyStep(sim, dt);
+      sim.t += dt; sim.steps++; sim.wearT += dt; sim.restT = (sim.restT || 0) + dt;
+      if (sim.ctrl) ctrlStep(sim, dt);
+      if ((sim.steps & 15) === 0) { const f = sim.foam, cl = sim.cells, dtr = dt * 16, kr = Math.exp(-dtr / f.tauRec), kd = Math.exp(-dtr / 0.05);
+        for (let b = 0; b < 2; b++) { const cv = cl.vis[b], tc = cl.touched[b], dn = cl.dent[b]; for (let c = 0; c < cv.length; c++) { if (!tc[c]) cv[c] *= kr; else tc[c] = 0; dn[c] *= kd; } } }
+      return; }
     // Vibration (speaker): the whole cartridge shakes sinusoidally. In the cartridge's own frame that is exactly an
     // oscillating extra gravity, g_eff = g - a_frame(t), with a_frame = a_peak * sin(2*pi*f*t) along the drive axis.
     let g = P.gravity;
@@ -1943,6 +1991,15 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       // broad phase on whole pills (sweep-and-prune on bounding spheres), then sphere pairs only between pills that
       // can touch; each pill's spheres are contiguous in _s*, so pair (k in i, m in j) keeps k < m and i < j
       let nb = 0; const pad = tackOn ? ADH_RANGE : 0;   // tack capture gap widens the broad phase
+      // per-pill reference pose for the pair lists: a pill gets a new epoch once any of its spheres may have moved more
+      // than PP_SKIN since its last reference (translation + rotation angle x bounding radius)
+      const PR = sim._ppr || (sim._ppr = { p: new Float64Array(B.cap * 7), id: new Int32Array(B.cap).fill(-1), ep: new Int32Array(B.cap) }), _pep = PR.ep, PCm = sim._ppc || (sim._ppc = new Map());
+      for (let i = 0; i < n; i++) { if (!B.alive[i]) continue; const o = i * 7;
+        if (PR.id[i] !== B.id[i]) { PR.id[i] = B.id[i]; _pep[i]++; }
+        else { const dx = B.px[i] - PR.p[o], dy = B.py[i] - PR.p[o + 1], dz = B.pz[i] - PR.p[o + 2], cq = Math.min(1, Math.abs(B.q[i * 4] * PR.p[o + 3] + B.q[i * 4 + 1] * PR.p[o + 4] + B.q[i * 4 + 2] * PR.p[o + 5] + B.q[i * 4 + 3] * PR.p[o + 6]));
+          if (Math.sqrt(dx * dx + dy * dy + dz * dz) + 2 * Math.acos(cq) * B.type[i].brad <= PP_SKIN) continue; _pep[i]++; }
+        PR.p[o] = B.px[i]; PR.p[o + 1] = B.py[i]; PR.p[o + 2] = B.pz[i]; PR.p[o + 3] = B.q[i * 4]; PR.p[o + 4] = B.q[i * 4 + 1]; PR.p[o + 5] = B.q[i * 4 + 2]; PR.p[o + 6] = B.q[i * 4 + 3]; }
+      if ((sim.steps & 1023) === 0) for (const [kk, e] of PCm) if (sim.steps - e.seen > 2048) PCm.delete(kk);   // forget pairs that drifted apart
       for (let i = 0; i < n; i++) if (B.alive[i]) { _bo[nb] = i; _bx[i] = B.px[i] - B.type[i].brad - pad; nb++; }
       const ord = _bo.subarray(0, nb); ord.sort((p_, q_) => _bx[p_] - _bx[q_]);
       for (let oi = 0; oi < nb; oi++) {
@@ -1952,10 +2009,25 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
           const Rj = B.type[bj0].brad + pad, ex = B.px[bi0] - B.px[bj0], ey = B.py[bi0] - B.py[bj0], ez = B.pz[bi0] - B.pz[bj0], RR = Ri + Rj;
           if (ex * ex + ey * ey + ez * ez >= RR * RR) continue;
           const lo = bi0 < bj0 ? bi0 : bj0, hi = bi0 < bj0 ? bj0 : bi0, cxh = B.px[hi], cyh = B.py[hi], czh = B.pz[hi], Rh = B.type[hi].brad;
-          for (let k = _bst[lo], ke = _bst[lo] + _bns[lo]; k < ke; k++) {
-            const qx = _sx[k] - cxh, qy = _sy[k] - cyh, qz = _sz[k] - czh, rq = _sr[k] + Rh + pad;
-            if (qx * qx + qy * qy + qz * qz >= rq * rq) continue;
-            for (let m = _bst[hi], me_ = _bst[hi] + _bns[hi]; m < me_; m++) {
+          /* Verlet pair list per pill pair (DEM neighbour-list method): the sphere pairs that can touch are collected once
+             (centre distance < contact reach + 4 x the per-pill skin) and reused until either pill has moved or turned more
+             than the skin from its reference pose. Pairs are kept in the same (k, m) order as the full double loop, so
+             forces are summed in the same order and results are identical -- only the pairs that cannot touch are skipped. */
+          const pkey = lo * 512 + hi; let PE = PCm.get(pkey);
+          if (!PE || PE.ilo !== B.id[lo] || PE.ihi !== B.id[hi] || PE.elo !== _pep[lo] || PE.ehi !== _pep[hi] || PE.tk !== tackOn) {
+            if (!PE) { PE = { a: new Uint8Array(32), b: new Uint8Array(32), n: 0 }; PCm.set(pkey, PE); }
+            PE.ilo = B.id[lo]; PE.ihi = B.id[hi]; PE.elo = _pep[lo]; PE.ehi = _pep[hi]; PE.tk = tackOn; let pn = 0; const ext = 4 * PP_SKIN;
+            for (let k = _bst[lo], ke = _bst[lo] + _bns[lo]; k < ke; k++) {
+              const qx = _sx[k] - cxh, qy = _sy[k] - cyh, qz = _sz[k] - czh, rq = _sr[k] + Rh + pad + ext;
+              if (qx * qx + qy * qy + qz * qz >= rq * rq) continue;
+              for (let m = _bst[hi], me_ = _bst[hi] + _bns[hi]; m < me_; m++) {
+                const ddx = _sx[k] - _sx[m], ddy = _sy[k] - _sy[m], ddz = _sz[k] - _sz[m], R2 = _sr[k] + _sr[m] + (tackOn ? ADH_RANGE : 0) + ext;
+                if (ddx * ddx + ddy * ddy + ddz * ddz >= R2 * R2) continue;
+                if (pn === PE.a.length) { const a2 = new Uint8Array(pn * 2), b2 = new Uint8Array(pn * 2); a2.set(PE.a); b2.set(PE.b); PE.a = a2; PE.b = b2; }
+                PE.a[pn] = k - _bst[lo]; PE.b[pn] = m - _bst[hi]; pn++; } }
+            PE.n = pn; }
+          PE.seen = sim.steps;
+          for (let pp = 0, kb = _bst[lo], mb = _bst[hi]; pp < PE.n; pp++) { const k = kb + PE.a[pp], m = mb + PE.b[pp]; {
             const ddx = _sx[k] - _sx[m], ddy = _sy[k] - _sy[m], ddz = _sz[k] - _sz[m], rr = _sr[k] + _sr[m], d2 = ddx * ddx + ddy * ddy + ddz * ddz;
             const rrA = tackOn ? rr + ADH_RANGE : rr;
             if (d2 >= rrA * rrA || d2 < 1e-18) continue;
@@ -2013,15 +2085,37 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       const G2 = sim.grid2 || null, G3 = low && sim.gate ? sim.gate.grid : null, G4 = low && sim.safety ? sim.safety.grid : null;
       if (hasG || G2 || G3 || G4) {
         let aP = -1, anx = 0, any = 0, anz = 0, arx = 0, ary = 0, arz = 0, wE = 0, wFn = 0, wPen = -1, wnx = 0, wny = 0, wnz = 0, wrx = 0, wry = 0, wrz = 0, wvx = 0, wvy = 0, wvz = 0;
-        for (let gi = 0; gi < 4; gi++) { const GG = gi === 0 ? G : gi === 1 ? G2 : gi === 2 ? G3 : G4; if (!GG) continue;
+        /* Static walls use a Verlet neighbour list (the DEM 'skin' method, as in LAMMPS / LIGGGHTS): each sphere keeps the
+           triangles whose box, grown by its radius + a 1 mm skin, holds its centre, and re-collects them only after it has
+           moved more than the skin. Every triangle that can touch it before then is already on the list, so the contacts
+           are the same as testing the grid every step -- just without re-walking the big cells. The sliding gates move,
+           so they are still looked up in their grids each step. */
+        const vk = i * 64 + _si[k]; let VL = null, vlN = 0;
+        if (hasG || G2) { const W = sim._vl || (sim._vl = { x: new Float64Array(B.cap * 64), y: new Float64Array(B.cap * 64), z: new Float64Array(B.cap * 64), id: new Int32Array(B.cap * 64).fill(-1), r: new Float64Array(B.cap * 64), L: new Array(B.cap * 64), n: new Int32Array(B.cap * 64), stamp: [new Int32Array(G ? G.n : 0), new Int32Array(G2 ? G2.n : 0)], sc: 0, builds: 0 });
+          const sk = VL_SKIN, ex = X - W.x[vk], ey = Y - W.y[vk], ez = Z - W.z[vk];
+          if (W.id[vk] !== B.id[i] || W.r[vk] !== rsA || ex * ex + ey * ey + ez * ez > sk * sk) {
+            let L = W.L[vk]; if (!L) L = W.L[vk] = new Int32Array(16); let n = 0; const R = rsA + sk, sc = ++W.sc; W.builds++;
+            for (let g = 0; g < 2; g++) { const GG = g === 0 ? G : G2; if (!GG) continue; const st = W.stamp[g], bb = GG.bb;
+              const i0 = Math.max(0, Math.floor((X - sk - GG.mn[0]) / GG.cell)), i1 = Math.min(GG.dim[0] - 1, Math.floor((X + sk - GG.mn[0]) / GG.cell)), j0 = Math.max(0, Math.floor((Y - sk - GG.mn[1]) / GG.cell)), j1 = Math.min(GG.dim[1] - 1, Math.floor((Y + sk - GG.mn[1]) / GG.cell)), k0 = Math.max(0, Math.floor((Z - sk - GG.mn[2]) / GG.cell)), k1 = Math.min(GG.dim[2] - 1, Math.floor((Z + sk - GG.mn[2]) / GG.cell));
+              for (let a = i0; a <= i1; a++) for (let b = j0; b <= j1; b++) for (let c = k0; c <= k1; c++) { const list = GG.cells.get((a * GG.dim[1] + b) * GG.dim[2] + c); if (!list) continue;
+                for (let li = 0; li < list.length; li++) { const t = list[li]; if (st[t] === sc) continue; st[t] = sc; const bo = t * 6;
+                  if (X < bb[bo] - R || X > bb[bo + 3] + R || Y < bb[bo + 1] - R || Y > bb[bo + 4] + R || Z < bb[bo + 2] - R || Z > bb[bo + 5] + R) continue;
+                  // exact: a triangle farther than radius + skin now cannot be touched before the next rebuild
+                  closestPtTri(X, Y, Z, GG.tris, t * 9, cp); { const qx = X - cp[0], qy = Y - cp[1], qz = Z - cp[2]; if (qx * qx + qy * qy + qz * qz > R * R) continue; }
+                  if (n === L.length) { const L2 = new Int32Array(L.length * 2); L2.set(L); L = W.L[vk] = L2; } L[n++] = t * 2 + g; } } }
+            W.n[vk] = n; W.x[vk] = X; W.y[vk] = Y; W.z[vk] = Z; W.id[vk] = B.id[i]; W.r[vk] = rsA; }
+          VL = W.L[vk]; vlN = W.n[vk]; }
+        for (let gi = 1; gi < 4; gi++) { const GG = gi === 1 ? (VL ? (G || G2) : null) : gi === 2 ? G3 : G4; if (!GG) continue;
         const gy = gi === 2 ? sim.gate.off : gi === 3 ? sim.safety.off : 0, gv = gi === 2 ? sim.gate.vel : gi === 3 ? sim.safety.vel : 0, Yl = Y - gy;   // gate grid is in its closed pose; it slides along +y
-        const ci = Math.floor((X - GG.mn[0]) / GG.cell), cj = Math.floor((Yl - GG.mn[1]) / GG.cell), ck = Math.floor((Z - GG.mn[2]) / GG.cell);
-        if (ci < 0 || cj < 0 || ck < 0 || ci >= GG.dim[0] || cj >= GG.dim[1] || ck >= GG.dim[2]) continue;
-        const list = GG.cells.get((ci * GG.dim[1] + cj) * GG.dim[2] + ck);
-        if (list) for (let li = 0; li < list.length; li++) {
-          const bo = list[li] * 6, bb = GG.bb;
+        let list = null, nl = 0;
+        if (gi === 1) { list = VL; nl = vlN; }
+        else { const ci = Math.floor((X - GG.mn[0]) / GG.cell), cj = Math.floor((Yl - GG.mn[1]) / GG.cell), ck = Math.floor((Z - GG.mn[2]) / GG.cell);
+          if (ci < 0 || cj < 0 || ck < 0 || ci >= GG.dim[0] || cj >= GG.dim[1] || ck >= GG.dim[2]) continue;
+          list = GG.cells.get((ci * GG.dim[1] + cj) * GG.dim[2] + ck); nl = list ? list.length : 0; }
+        for (let li = 0; li < nl; li++) {
+          const e = list[li], TG = gi === 1 ? ((e & 1) ? G2 : G) : GG, tt = gi === 1 ? e >> 1 : e, bo = tt * 6, bb = TG.bb;
           if (X < bb[bo] - rsA || X > bb[bo + 3] + rsA || Yl < bb[bo + 1] - rsA || Yl > bb[bo + 4] + rsA || Z < bb[bo + 2] - rsA || Z > bb[bo + 5] + rsA) continue;
-          closestPtTri(X, Yl, Z, GG.tris, list[li] * 9, cp); cp[1] += gy;
+          closestPtTri(X, Yl, Z, TG.tris, tt * 9, cp); cp[1] += gy;
           const dx = X - cp[0], dy = Y - cp[1], dz = Z - cp[2], d2 = dx * dx + dy * dy + dz * dz;
           if (d2 >= rsA * rsA || d2 < 1e-18) continue;
           const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, nz = dz / d, pen = rs - d, T = B.type[i];
@@ -2054,9 +2148,16 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
           B.fx[i] += ax; B.fy[i] += ay; B.fz[i] += az; B.tx[i] += ary * az - arz * ay; B.ty[i] += arz * ax - arx * az; B.tz[i] += arx * ay - ary * ax;
         }
       }
-      if (sim.sing) singContact(sim, B, i, k, X, Y, Z, rs, dt);
+      if (sim.sing) { const K = sim.sing; if (K._hl == null) { K._hl = 0.5 * Math.hypot(K.b[0] - K.a[0], K.b[1] - K.a[1], K.b[2] - K.a[2]); K._m = [0, 1, 2].map(j => 0.5 * (K.a[j] + K.b[j])); }
+        const mx = X - K._m[0], my = Y - K._m[1], mz = Z - K._m[2], RR = K._hl + K.r + rs + 1e-9;   // bounding sphere of the singulator rod
+        if (mx * mx + my * my + mz * mz < RR * RR) singContact(sim, B, i, k, X, Y, Z, rs, dt); }
       if (sim.xp) extraContact(sim, B, i, k, X, Y, Z, rs, dt);
-      if (!sim.noFoam) { foamContact(sim, B, i, X, Y, Z, rs, 0, dt, _si[k]); foamContact(sim, B, i, X, Y, Z, rs, 1, dt, _si[k]); }
+      if (!sim.noFoam) {   // same reach test foamContact starts with, done once for both belts (skips the call for the hopper bulk)
+        const hR = sim.P.thickness + (sim.tex && sim.tex.active ? sim.tex.hmax : 0) + sim.Rb, ddx = X - sim.O[0], ddy = Y - sim.O[1], ddz = Z - sim.O[2];
+        const fu = ddx * sim.EU[0] + ddy * sim.EU[1] + ddz * sim.EU[2] - sim.U0, fv = ddx * sim.EV[0] + ddy * sim.EV[1] + ddz * sim.EV[2], fx = ddx * sim.EX[0] + ddy * sim.EX[1] + ddz * sim.EX[2];
+        if (!(fv < -rs || fv > sim.W + rs || fu < -(hR + rs + 2e-3) || fu > sim.Lc + hR + rs + 2e-3)) {
+          if (!(Math.abs(fx) > hR + 2.5e-3 + rs)) foamContact(sim, B, i, X, Y, Z, rs, 0, dt, _si[k]);
+          if (!(Math.abs(fx - sim.XB) > hR + 2.5e-3 + rs)) foamContact(sim, B, i, X, Y, Z, rs, 1, dt, _si[k]); } }
     }
     const rotv = [0, 0, 0], wb = [0, 0, 0], tb = [0, 0, 0];
     for (let i = 0; i < n; i++) {
@@ -2131,7 +2232,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function newSim() {
     try { dustLedgerTick(); } catch (e) {}   // before startup the bank does not exist yet
     if (typeof TEX !== 'undefined') TEX.W = S.geom.W * 1e-3;
-    sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, params: { rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
+    sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, params: { restSleep: true, rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
     applyParams();
     if (typeof dustStaticTris !== 'undefined' && dustStaticTris) sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3));
     if (typeof idleBeltDirty !== 'undefined') idleBeltDirty = true;   // re-freeze the idle belts from the new geometry
@@ -2425,7 +2526,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       for (const p of XP) if (p.mesh) { const c = p.col, col = [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16) / 255); if (p.alpha < 0.99) { gl.enable(gl.BLEND); gl.depthMask(false); draw(p.mesh, Mx, col, p.alpha, true); gl.depthMask(true); } else draw(p.mesh, Mx, col, 1, true); } gl.disable(gl.BLEND); }
     // dust specks: each falls straight down at a settling speed (~15 mm/s) from where it was shed, lands on the first
     // surface below (wall, plate, hopper, glass or belt -- FFx.dustLand) and sticks; specks on a belt ride with it
-    // dust specks: advanced by the engine (FFx.dustUpdate, every 2 ms of sim time); drawn where it left them
+    // dust specks: advanced by the engine (FFx.dustUpdate, every 5 ms of sim time); drawn where it left them
     if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx; let n = 0;
       if (!sim.dustGrid && dustStaticTris) { sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3)); }
       if (!Dx.md) FFx.dustUpdate(sim);
@@ -3249,7 +3350,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   let settleJob = null;
   function settleStep() {
     if (!settleJob) { const k = BANK.units.findIndex((u, i) => i < BANK.n && i !== BANK.cur && !u.snap); if (k < 0) return;
-      const u = BANK.units[k], sm = FFx.createSim(CAD, { pill: u.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, noFoam: false, params: { rpm: 0, thickness: S.thick * 1e-3, dt: S.dtMode } }); sm.P.rpm = 0; sm.addPills(u.count); settleJob = { k, sm }; }
+      const u = BANK.units[k], sm = FFx.createSim(CAD, { pill: u.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, noFoam: false, params: { restSleep: true, rpm: 0, thickness: S.thick * 1e-3, dt: S.dtMode } }); sm.P.rpm = 0; sm.addPills(u.count); settleJob = { k, sm }; }
     const J = settleJob, t0 = performance.now(); while (performance.now() - t0 < 4 && J.sm.t < 1.2) J.sm.step(20);
     if (J.sm.t >= 1.2) { const u = BANK.units[J.k]; if (u && !u.snap && J.k !== BANK.cur) u.snap = snapPills(J.sm); settleJob = null; bankUI(); }
   }
