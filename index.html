@@ -1647,12 +1647,42 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x, v = f * (-qz); if (v < 0 || u + v > 1) return -1;
     const t = f * (e2x * qx + e2y * qy + e2z * qz); return t >= -1e-5 ? Math.max(0, t) : -1;
   }
+  // general ray / triangle (Moller-Trumbore), direction d; returns t >= 0 or -1
+  function rayTri(px, py, pz, dx, dy, dz, T, o) {
+    const ax = T[o], ay = T[o + 1], az = T[o + 2], e1x = T[o + 3] - ax, e1y = T[o + 4] - ay, e1z = T[o + 5] - az, e2x = T[o + 6] - ax, e2y = T[o + 7] - ay, e2z = T[o + 8] - az;
+    const hx = dy * e2z - dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y - dy * e2x, a = e1x * hx + e1y * hy + e1z * hz; if (Math.abs(a) < 1e-18) return -1;
+    const f = 1 / a, sx = px - ax, sy = py - ay, sz = pz - az, u = f * (sx * hx + sy * hy + sz * hz); if (u < 0 || u > 1) return -1;
+    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x, v = f * (dx * qx + dy * qy + dz * qz); if (v < 0 || u + v > 1) return -1;
+    const t = f * (e2x * qx + e2y * qy + e2z * qz); return t >= 0 ? t : -1;
+  }
+  /* Dust sees every solid in the model: the contact grids (hopper, plate, throat, housing shells, sensor block, imported
+     solid parts), a display-only grid of all the hardware (bearings, washers, pins, motor, worm, servo, wheels; built by
+     the app as sim.dustGrid) and the two sliding parts (servo gate, pill-width safety gate) in their current pose. */
+  function dustStatics(sim) { const out = [sim.grid, sim.grid2, sim.dustGrid]; if (sim.xp) for (const p of sim.xp) if (p.solid !== false && p.grid) out.push(p.grid); return out.filter(Boolean); }
+  function dustMovers(sim) { const out = []; if (sim.safety) out.push(sim.safety); if (sim.gate) out.push(sim.gate); return out; }
+  // first solid met by a dust speck pushed along +/-y over len (m), skipping the sliding part that carries it; -1 = none
+  function dustRayY(sim, px, py, pz, dir, len, carrier) {
+    let best = -1; const GS = dustStatics(sim).map(G => [G, 0]); for (const m of dustMovers(sim)) if (m !== carrier) GS.push([m.grid, m.off]);
+    for (const [G, gy] of GS) { py -= gy; const ci = Math.floor((px - G.mn[0]) / G.cell), ck = Math.floor((pz - G.mn[2]) / G.cell); if (ci < 0 || ck < 0 || ci >= G.dim[0] || ck >= G.dim[2]) { py += gy; continue; }
+      const y0 = Math.min(py, py + dir * len), y1 = Math.max(py, py + dir * len), j0 = Math.max(0, Math.floor((y0 - G.mn[1]) / G.cell)), j1 = Math.min(G.dim[1] - 1, Math.floor((y1 - G.mn[1]) / G.cell)), seen = new Set();
+      for (let cj = j0; cj <= j1; cj++) { const l = G.cells.get((ci * G.dim[1] + cj) * G.dim[2] + ck); if (l) for (const t of l) { if (seen.has(t)) continue; seen.add(t); const d = rayTri(px, py, pz, 0, dir, 0, G.tris, t * 9); if (d >= 0 && d <= len && (best < 0 || d < best)) best = d; } }
+      py += gy; }
+    return best;
+  }
+  // distance straight down from (px,py,pz) to a sliding part's top in its current pose, within maxD (m); -1 = not over it
+  function dustGateDown(sim, px, py, pz, maxD, mover) {
+    const sf = mover || sim.safety; if (!sf) return -1; const G = sf.grid, y = py - sf.off, ci = Math.floor((px - G.mn[0]) / G.cell), cj = Math.floor((y - G.mn[1]) / G.cell);
+    if (ci < 0 || cj < 0 || ci >= G.dim[0] || cj >= G.dim[1]) return -1; let best = -1;
+    for (let ck = Math.min(G.dim[2] - 1, Math.floor((pz - G.mn[2]) / G.cell)); ck >= 0; ck--) { const l = G.cells.get((ci * G.dim[1] + cj) * G.dim[2] + ck); if (l) for (const t of l) { const d = rayTriDown(px, y, pz, G.tris, t * 9); if (d >= 0 && d <= maxD && (best < 0 || d < best)) best = d; } if (G.mn[2] + ck * G.cell < pz - maxD) break; }
+    return best;
+  }
   function dustLand(sim, px, py, pz) {
-    let best = pz - (sim.floorZ || 0) + 0.01, hit = null;
-    for (const G of [sim.grid, sim.grid2]) if (G) { const ci = Math.floor((px - G.mn[0]) / G.cell), cj = Math.floor((py - G.mn[1]) / G.cell);
+    let best = pz - (sim.floorZ || 0) + 0.01, hit = null, gate = false, mover = -1; const MV = dustMovers(sim);
+    MV.forEach((m, i) => { const d = dustGateDown(sim, px, py, pz, best, m); if (d >= 0 && d < best) { best = d; gate = true; mover = i; } });
+    for (const G of dustStatics(sim)) { const ci = Math.floor((px - G.mn[0]) / G.cell), cj = Math.floor((py - G.mn[1]) / G.cell);
       if (ci >= 0 && cj >= 0 && ci < G.dim[0] && cj < G.dim[1]) { const seen = new Set();
         for (let ck = Math.min(G.dim[2] - 1, Math.floor((pz - G.mn[2]) / G.cell)); ck >= 0; ck--) {
-          const l = G.cells.get((ci * G.dim[1] + cj) * G.dim[2] + ck); if (l) for (const t of l) { if (seen.has(t)) continue; seen.add(t); const d = rayTriDown(px, py, pz, G.tris, t * 9); if (d >= 0 && d < best) best = d; }
+          const l = G.cells.get((ci * G.dim[1] + cj) * G.dim[2] + ck); if (l) for (const t of l) { if (seen.has(t)) continue; seen.add(t); const d = rayTriDown(px, py, pz, G.tris, t * 9); if (d >= 0 && d < best) { best = d; gate = false; mover = -1; } }
           if (G.mn[2] + ck * G.cell < pz - best) break; } } }
     const O = sim.O, EX = sim.EX, EU = sim.EU, EV = sim.EV, Rr = sim.Rb + sim.P.thickness, U0 = sim.U0, Ut = sim.U0 + sim.Lc;
     const dx = px - O[0], dy = py - O[1], dz = pz - O[2], x = dx * EX[0] + dy * EX[1] + dz * EX[2], u0 = dx * EU[0] + dy * EU[1] + dz * EU[2], v0 = dx * EV[0] + dy * EV[1] + dz * EV[2];
@@ -1668,9 +1698,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         if (u >= U0 && u <= Ut) s = a >= 0 ? Ut - u : sim.Lc + PI * Rr + (u - U0);
         else if (u < U0) s = sim.Lc + Rr * -Math.atan2(u - U0, a);
         else s = 2 * sim.Lc + PI * Rr + Rr * (PI - Math.atan2(u - Ut, a));
-        hit = { belt: b, s, v: v0 - te * EV[2] }; }
+        hit = { belt: b, s, v: v0 - te * EV[2] }; gate = false; mover = -1; }
     }
-    return { d: best, belt: hit ? hit.belt : -1, s: hit ? hit.s : 0, v: hit ? hit.v : 0 };
+    return { d: best, belt: hit ? hit.belt : -1, s: hit ? hit.s : 0, v: hit ? hit.v : 0, gate, mover: gate ? MV[mover] : null };
   }
   function beltPoint(sim, b, s, v, out) {   // inverse of the belt arc map: world point on the foam surface
     const Rr = sim.Rb + sim.P.thickness, Lc = sim.Lc, per = 2 * Lc + TAU * Rr, U0 = sim.U0, Ut = U0 + Lc; s = ((s % per) + per) % per; let a, u;
@@ -2020,7 +2050,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     }
   }
   const createSim2 = createSim;
-  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -2206,10 +2236,12 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 
   /* ---------------------------------------------------------------- belt meshes (deformable) */
   const NS = 408, NV = 33;   // fine enough to show painted ridges / grooves
-  const beltMesh = [0, 1].map(() => { const nvx = NS * NV + 2 * NS * 2; const pos = new Float32Array(nvx * 3), col = new Float32Array(nvx * 3), idx = [];
+  const beltMesh = [0, 1].map(() => { const nvx = NS * NV + 3 * NS * 2; const pos = new Float32Array(nvx * 3), col = new Float32Array(nvx * 3), idx = [];
     for (let i = 0; i < NS; i++) for (let j = 0; j < NV - 1; j++) { const a = i * NV + j, b = ((i + 1) % NS) * NV + j; idx.push(a, b, a + 1, b, b + 1, a + 1); }
     // side walls: two strips (v=0, v=W), each 2 verts per sample (outer, inner)
     for (let sd = 0; sd < 2; sd++) { const base = NS * NV + sd * NS * 2; for (let i = 0; i < NS; i++) { const a = base + i * 2, b = base + ((i + 1) % NS) * 2; idx.push(a, b, a + 1, b, b + 1, a + 1); } }
+    // inner face (the belt's back, running on the idlers and drive wheels): 2 verts per sample (v = 0, v = W)
+    { const base = NS * NV + 2 * NS * 2; for (let i = 0; i < NS; i++) { const a = base + i * 2, b = base + ((i + 1) % NS) * 2; idx.push(a, a + 1, b, b, a + 1, b + 1); } }
     const ia = new Uint32Array(idx), m = mkMesh(pos, ia, null, col, true); m.pos = pos; m.col = col; m.idx = ia; return m; });
   // idle dispensers get their own frozen copy of the belts (the live beltMesh moves with the running unit)
   let idleBelt = null, idleBeltDirty = true, idleBeltS = NaN;
@@ -2252,6 +2284,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         }
         for (let sd = 0; sd < 2; sd++) { const o = (NS * NV + sd * NS * 2 + i * 2) * 3, v = sd * W, he = Math.max(0, tH(v)); put(M.pos, o, xl + nxl * he, u + nu * he, v); put(M.pos, o + 3, xl - nxl * h, u - nu * h, v);
           const sc = paint([0.1, 0.1, 0.12], 0); for (let k = 0; k < 6; k += 3) { M.col[o + k] = sc[0]; M.col[o + k + 1] = sc[1]; M.col[o + k + 2] = sc[2]; } }
+        { const o = (NS * NV + 2 * NS * 2 + i * 2) * 3; put(M.pos, o, xl - nxl * h, u - nu * h, 0); put(M.pos, o + 3, xl - nxl * h, u - nu * h, W); for (let k = 0; k < 6; k += 3) { M.col[o + k] = 0.12; M.col[o + k + 1] = 0.12; M.col[o + k + 2] = 0.14; } }
       }
       gl.bindVertexArray(M.vao); gl.bindBuffer(gl.ARRAY_BUFFER, M.pb); gl.bufferSubData(gl.ARRAY_BUFFER, 0, M.pos); gl.bindBuffer(gl.ARRAY_BUFFER, M.cb); gl.bufferSubData(gl.ARRAY_BUFFER, 0, M.col);
     }
@@ -2333,11 +2366,60 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     // dust specks: each falls straight down at a settling speed (~15 mm/s) from where it was shed, lands on the first
     // surface below (wall, plate, hopper, glass or belt -- FFx.dustLand) and sticks; specks on a belt ride with it
     if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx, now = sim.t, vs = 15e-3; let n = 0;
-      if (!dustGL || dustGL.cap !== Dx.cap) { dustGL = { cap: Dx.cap, buf: new Float32Array(Dx.cap * 3), tk: new Float32Array(Dx.cap).fill(-1e9), d: new Float32Array(Dx.cap), b: new Int8Array(Dx.cap), s: new Float32Array(Dx.cap), v: new Float32Array(Dx.cap), S0: new Float64Array(Dx.cap), vao: gl.createVertexArray(), pb: gl.createBuffer(), p: [0, 0, 0] }; gl.bindVertexArray(dustGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, dustGL.pb); gl.bufferData(gl.ARRAY_BUFFER, dustGL.buf.byteLength, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
+      if (!dustGL || dustGL.cap !== Dx.cap) { dustGL = { cap: Dx.cap, buf: new Float32Array(Dx.cap * 3), tk: new Float32Array(Dx.cap).fill(-1e9), d: new Float32Array(Dx.cap), b: new Int8Array(Dx.cap), s: new Float32Array(Dx.cap), v: new Float32Array(Dx.cap), S0: new Float64Array(Dx.cap), g: new Int8Array(Dx.cap), md: new Int8Array(Dx.cap), px: new Float64Array(Dx.cap), py: new Float64Array(Dx.cap), pz: new Float64Array(Dx.cap), ly: new Float64Array(Dx.cap), ot: new Float64Array(Dx.cap), zp: new Float64Array(Dx.cap), pi: new Int32Array(Dx.cap), pid: new Float64Array(Dx.cap), lx: new Float64Array(Dx.cap * 3), vao: gl.createVertexArray(), pb: gl.createBuffer(), p: [0, 0, 0] }; gl.bindVertexArray(dustGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, dustGL.pb); gl.bufferData(gl.ARRAY_BUFFER, dustGL.buf.byteLength, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
       if (dustGL.sim !== sim) { dustGL.sim = sim; dustGL.tk.fill(-1e9); }
       const Gd = dustGL, Sx = sim.S || 0;
+      /* specks that land on the pill-width safety gate ride on it (fine powder sticks). As it slides, a speck is carried
+         until something static is in its way at its own height (speck radius 3-33 um above the gate top): then it is held
+         against that wall while the gate slides on under it. Where the wall stands higher above the gate than the speck,
+         the speck passes underneath with the gate into the space behind; when the gate comes back that side of the wall
+         holds it, so it ends up beyond the wall. A speck left with no gate under it (hole, edge) falls again. */
+      if (!sim.dustGrid && dustStaticTris) sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3));
+      const MV = FFx.dustMovers(sim), put3 = (k, x, y, z) => { const o = n * 3; Gd.buf[o] = x * 1e3; Gd.buf[o + 1] = y * 1e3; Gd.buf[o + 2] = z * 1e3; n++; };
+      const mvIdx = m => m ? MV.indexOf(m) + 1 : 0;
+      // pills are solid too: a falling speck that meets a pill sticks to it and rides with it (pill frame), and falls again
+      // from where it was if that pill leaves the simulation
+      const Bp = sim.bodies, PL = []; for (let i = 0; i < Bp.n; i++) if (Bp.alive[i]) { const sp = Bp.type[i].spec, rb = 0.5e-3 * Math.max(sp.W || 0, sp.L || 0, sp.T || 0) + 1e-4; PL.push([i, rb]); }
+      const inPill = (i, x, y, z, out) => { const sp = Bp.type[i].spec, w = Bp.q[i * 4], qx = Bp.q[i * 4 + 1], qy = Bp.q[i * 4 + 2], qz = Bp.q[i * 4 + 3], dx = (x - Bp.px[i]) * 1e3, dy = (y - Bp.py[i]) * 1e3, dz = (z - Bp.pz[i]) * 1e3;
+        // local = R^T d
+        const r00 = 1 - 2 * (qy * qy + qz * qz), r01 = 2 * (qx * qy - w * qz), r02 = 2 * (qx * qz + w * qy), r10 = 2 * (qx * qy + w * qz), r11 = 1 - 2 * (qx * qx + qz * qz), r12 = 2 * (qy * qz - w * qx), r20 = 2 * (qx * qz - w * qy), r21 = 2 * (qy * qz + w * qx), r22 = 1 - 2 * (qx * qx + qy * qy);
+        const lx = r00 * dx + r10 * dy + r20 * dz, ly = r01 * dx + r11 * dy + r21 * dz, lz = r02 * dx + r12 * dy + r22 * dz, m = 0.05; let ins;
+        if (sp.shape === 'tablet') ins = Math.abs(lz) <= sp.T / 2 + m && lx * lx + ly * ly <= (sp.W / 2 + m) ** 2;
+        else if (sp.shape === 'sphere') ins = lx * lx + ly * ly + lz * lz <= (sp.W / 2 + m) ** 2;
+        else if (sp.shape === 'ellipsoid') ins = (lx / (sp.L / 2 + m)) ** 2 + (ly / (sp.W / 2 + m)) ** 2 + (lz / ((sp.T || sp.W) / 2 + m)) ** 2 <= 1;
+        else { const r = sp.W / 2, hs = Math.max(sp.L / 2 - r, 0), cx = Math.max(-hs, Math.min(hs, lx)); ins = (lx - cx) ** 2 + ly * ly + lz * lz <= (r + m) ** 2; }
+        if (ins && out) { out[0] = lx; out[1] = ly; out[2] = lz; } return ins; };
+      // only a pill the speck moves INTO (outside it last frame) catches it, so a speck is not caught by the pill it was shed from
+      const lp = [0, 0, 0], catchPill = (k, x, y, z) => { const zq = Gd.zp[k]; Gd.zp[k] = z; for (const [i, rb] of PL) { const ex = x - Bp.px[i], ey = y - Bp.py[i], ez = z - Bp.pz[i]; if (ex * ex + ey * ey + ez * ez > rb * rb) continue;
+          if (inPill(i, x, y, z, lp) && !inPill(i, x, y, zq, null)) { Gd.md[k] = 5; Gd.pi[k] = i; Gd.pid[k] = Bp.id[i]; Gd.lx[k * 3] = lp[0]; Gd.lx[k * 3 + 1] = lp[1]; Gd.lx[k * 3 + 2] = lp[2]; Gd.px[k] = x; Gd.py[k] = y; Gd.pz[k] = z; return true; } } return false; };
+      const dropFrom = (k, x, y, z) => { const L = FFx.dustLand(sim, x, y, z - 1e-6); Gd.md[k] = 2; Gd.px[k] = x; Gd.py[k] = y; Gd.pz[k] = z; Gd.zp[k] = z; Gd.ot[k] = now; Gd.d[k] = L.d + 1e-6; Gd.g[k] = mvIdx(L.mover); Gd.b[k] = L.belt; Gd.s[k] = L.s; Gd.v[k] = L.v; Gd.S0[k] = NaN; };
+      // land on sliding part #g (1-based in MV); if it is no longer under the speck, keep falling
+      const onGate = (k, x, y, z, g) => { const m = MV[g - 1], d = m ? FFx.dustGateDown(sim, x, y, z + 2e-5, 4e-4, m) : -1; if (d < 0) { dropFrom(k, x, y, z); return; } Gd.md[k] = 1; Gd.g[k] = g; Gd.px[k] = x; Gd.py[k] = y; Gd.pz[k] = z + 2e-5 - d; Gd.ly[k] = y - m.off; };
       for (let k = 0; k < Dx.cap; k++) { const t0 = Dx.t[k]; if (t0 < 0 || t0 > now) continue;
-        if (Gd.tk[k] !== t0) { const L = FFx.dustLand(sim, Dx.x[k], Dx.y[k], Dx.z[k]); Gd.tk[k] = t0; Gd.d[k] = L.d; Gd.b[k] = L.belt; Gd.s[k] = L.s; Gd.v[k] = L.v; Gd.S0[k] = NaN; }
+        if (Gd.tk[k] !== t0) { const L = FFx.dustLand(sim, Dx.x[k], Dx.y[k], Dx.z[k]); Gd.tk[k] = t0; Gd.d[k] = L.d; Gd.b[k] = L.belt; Gd.s[k] = L.s; Gd.v[k] = L.v; Gd.S0[k] = NaN; Gd.g[k] = mvIdx(L.mover); Gd.md[k] = 0; Gd.zp[k] = Dx.z[k]; }
+        if (Gd.md[k] === 0 && Gd.g[k] && (now - t0) * vs >= Gd.d[k]) onGate(k, Dx.x[k], Dx.y[k], Dx.z[k] - Gd.d[k], Gd.g[k]);
+        if (Gd.md[k] === 0 && (now - t0) * vs < Gd.d[k] && catchPill(k, Dx.x[k], Dx.y[k], Dx.z[k] - (now - t0) * vs)) {}
+        if (Gd.md[k] === 2) { const f = (now - Gd.ot[k]) * vs;
+          if (f < Gd.d[k] && !catchPill(k, Gd.px[k], Gd.py[k], Gd.pz[k] - f)) { put3(k, Gd.px[k], Gd.py[k], Gd.pz[k] - f); continue; }
+          if (Gd.md[k] === 2) {
+          if (Gd.g[k]) onGate(k, Gd.px[k], Gd.py[k], Gd.pz[k] - Gd.d[k], Gd.g[k]);
+          else if (Gd.b[k] < 0) { Gd.md[k] = 3; Gd.pz[k] -= Gd.d[k]; } else Gd.md[k] = 4; } }
+        if (Gd.md[k] === 5) { const i = Gd.pi[k];
+          if (i >= Bp.n || !Bp.alive[i] || Bp.id[i] !== Gd.pid[k]) { dropFrom(k, Gd.px[k], Gd.py[k], Gd.pz[k]); put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
+          const w = Bp.q[i * 4], qx = Bp.q[i * 4 + 1], qy = Bp.q[i * 4 + 2], qz = Bp.q[i * 4 + 3], lx = Gd.lx[k * 3], ly = Gd.lx[k * 3 + 1], lz = Gd.lx[k * 3 + 2];
+          Gd.px[k] = Bp.px[i] + 1e-3 * ((1 - 2 * (qy * qy + qz * qz)) * lx + 2 * (qx * qy - w * qz) * ly + 2 * (qx * qz + w * qy) * lz);
+          Gd.py[k] = Bp.py[i] + 1e-3 * (2 * (qx * qy + w * qz) * lx + (1 - 2 * (qx * qx + qz * qz)) * ly + 2 * (qy * qz - w * qx) * lz);
+          Gd.pz[k] = Bp.pz[i] + 1e-3 * (2 * (qx * qz - w * qy) * lx + 2 * (qy * qz + w * qx) * ly + (1 - 2 * (qx * qx + qy * qy)) * lz);
+          put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
+        if (Gd.md[k] === 1) { const m = MV[Gd.g[k] - 1]; if (!m) { dropFrom(k, Gd.px[k], Gd.py[k], Gd.pz[k]); put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
+          const x = Gd.px[k], z = Gd.pz[k], tgt = Gd.ly[k] + m.off, dy = tgt - Gd.py[k], r = 3e-6 + ((k * 2654435761) % 1000) * 3e-8;
+          if (Math.abs(dy) > 1e-8) { const sg = dy > 0 ? 1 : -1, hit = FFx.dustRayY(sim, x, Gd.py[k], z + r, sg, Math.abs(dy), m);
+            if (hit >= 0) { Gd.py[k] += sg * Math.max(0, hit - 2e-6); Gd.ly[k] = Gd.py[k] - m.off; } else Gd.py[k] = tgt; }
+          if (FFx.dustGateDown(sim, x, Gd.py[k], z + 2e-5, 4e-4, m) < 0) dropFrom(k, x, Gd.py[k], z);
+          if (Gd.md[k] === 2) { put3(k, x, Gd.py[k], z); continue; }
+          put3(k, x, Gd.py[k], Gd.pz[k]); continue; }
+        if (Gd.md[k] === 3) { if (Gd.pz[k] >= 0) put3(k, Gd.px[k], Gd.py[k], Gd.pz[k]); continue; }
+        if (Gd.md[k] === 4) { const o = n * 3; if (Number.isNaN(Gd.S0[k])) Gd.S0[k] = Sx; FFx.beltPoint(sim, Gd.b[k], Gd.s[k] + (Sx - Gd.S0[k]), Gd.v[k], Gd.p); Gd.buf[o] = Gd.p[0] * 1e3; Gd.buf[o + 1] = Gd.p[1] * 1e3; Gd.buf[o + 2] = Gd.p[2] * 1e3; n++; continue; }
         const fall = (now - t0) * vs, o = n * 3;
         if (fall < Gd.d[k] || Gd.b[k] < 0) { if (Dx.z[k] - Math.min(fall, Gd.d[k]) < 0) continue;   // fell out of the bottom of the model
           Gd.buf[o] = Dx.x[k] * 1e3; Gd.buf[o + 1] = Dx.y[k] * 1e3; Gd.buf[o + 2] = (Dx.z[k] - Math.min(fall, Gd.d[k])) * 1e3; n++; continue; }
@@ -2829,6 +2911,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   const ORIG = { parts: CAD.parts.slice(), cam: JSON.parse(JSON.stringify(CAD.cam)) };
   const meshCache = new Map();   // part -> { key, mesh } (rebuilt when the belt layout changes)
   let camGen = null;                                  // generated meshes for an uploaded cam profile
+  let dustStaticTris = null;
   function rebuildGLParts() {
     parts.length = 0; const key = geomKey();
     for (const p of CAD.parts) {
@@ -2846,6 +2929,11 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       parts.push({ role: p.role, rot: p.rot, mesh: c.mesh, id: p.id, idler: info.idler, kind: info.kind });
     }
     if (CAD.cam.custom && camGen) for (const g of camGen) parts.push(g);
+    // dust collides with every solid: hardware that has no contact grid (bearings, pins, washers, motor, worm, servo,
+    // wheels, gears) goes into a display-only grid; sliding gate parts / linkage are handled live
+    { const arr = []; for (const p of CAD.parts) { if (['gate', 'safety', 'link', 'belt', 'hopper', 'plate', 'shell', 'block', 'ignore'].includes(p.role)) continue; const c = meshCache.get(p); if (!c || !c.vv) continue; const v = c.vv, t = c.tt; for (let i = 0; i < t.length; i++) { const o = t[i] * 3; arr.push(v[o] * 1e-3, v[o + 1] * 1e-3, v[o + 2] * 1e-3); } }
+      if (camGen) for (const g of camGen) if (g.vv) { const v = g.vv, t = g.tt; for (let i = 0; i < t.length; i++) { const o = t[i] * 3; arr.push(v[o] * 1e-3, v[o + 1] * 1e-3, v[o + 2] * 1e-3); } }
+      dustStaticTris = arr.length ? { tris: new Float64Array(arr), grid: null } : null; if (typeof sim !== 'undefined' && sim) sim.dustGrid = null; }
     ghostDirty = true;
     if (throatGL) { for (const b of [throatGL.pb, throatGL.nb, throatGL.cb, throatGL.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(throatGL.vao); throatGL = null; }
     if (S.throat && S.throat.on) {
@@ -3417,7 +3505,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('vibDir').onchange = e => { S.vib.axis = e.target.value; applyVib(); };
 
   // test hooks
-  window.__FF = { get sim() { return sim; }, S, cam, setPreset, frame, step: n => sim.step(n), render, BANK, setBankN, beltMesh, get idleBelt() { return idleBelt; } };
+  window.__FF = { get sim() { return sim; }, S, cam, setPreset, frame, step: n => sim.step(n), render, BANK, setBankN, beltMesh, get idleBelt() { return idleBelt; }, get dustGL() { return dustGL; } };
 
   newSim(); syncUI(); applyFoam(); applyParams(); applyTex();
   $('camShape').value = 'round'; applyCamProfile(new Array(72).fill(7.0), 'Round drive wheel (r 7.0 mm, no lobes) — default');   // default drive: round wheel
