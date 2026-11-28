@@ -601,7 +601,11 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
     out[0] = x + w * tx + (qy * tz - qz * ty); out[1] = y + w * ty + (qz * tx - qx * tz); out[2] = z + w * tz + (qx * ty - qy * tx);
   }
-  function qconjv(q, x, y, z, out) { qmulv([q[0], -q[1], -q[2], -q[3]], x, y, z, out); }
+  function qconjv(q, x, y, z, out) { // rotate by the conjugate (inverse) quaternion; qmulv inlined, no temp array
+    const w = q[0], qx = -q[1], qy = -q[2], qz = -q[3];
+    const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+    out[0] = x + w * tx + (qy * tz - qz * ty); out[1] = y + w * ty + (qz * tx - qx * tz); out[2] = z + w * tz + (qx * ty - qy * tx);
+  }
 
   function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
 
@@ -621,7 +625,17 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     }
     const bb = new Float64Array(n * 6);
     for (let t = 0; t < n; t++) for (let a = 0; a < 3; a++) { const x = tris[t * 9 + a], y = tris[t * 9 + 3 + a], z = tris[t * 9 + 6 + a]; bb[t * 6 + a] = Math.min(x, y, z); bb[t * 6 + 3 + a] = Math.max(x, y, z); }
-    return { tris, n, mn, mx, dim, cell, cells, bb };
+    return { tris, n, mn, mx, dim, cell, cells, bb, margin };
+  }
+  /* A cell lists every triangle whose box comes within `margin` of it, so one cell holds all a sphere can touch only while
+     its radius <= margin. Bigger spheres (000 capsules, 10 mm beads) gather the cells within ext = r - margin of the centre
+     (each triangle once, in index order like a cell list). Returns the count; the ids are in GG.near. */
+  function gridNear(GG, X, Y, Z, ext) {
+    const st = GG.st || (GG.st = new Int32Array(GG.n)), sc = GG.sc = (GG.sc || 0) + 1, c = GG.cell, mn = GG.mn, dm = GG.dim; let out = GG.near || (GG.near = new Int32Array(64)), n = 0;
+    const i0 = Math.max(0, Math.floor((X - ext - mn[0]) / c)), i1 = Math.min(dm[0] - 1, Math.floor((X + ext - mn[0]) / c)), j0 = Math.max(0, Math.floor((Y - ext - mn[1]) / c)), j1 = Math.min(dm[1] - 1, Math.floor((Y + ext - mn[1]) / c)), k0 = Math.max(0, Math.floor((Z - ext - mn[2]) / c)), k1 = Math.min(dm[2] - 1, Math.floor((Z + ext - mn[2]) / c));
+    for (let a = i0; a <= i1; a++) for (let b = j0; b <= j1; b++) for (let k = k0; k <= k1; k++) { const l = GG.cells.get((a * dm[1] + b) * dm[2] + k); if (!l) continue;
+      for (let q = 0; q < l.length; q++) { const t = l[q]; if (st[t] === sc) continue; st[t] = sc; if (n === out.length) { const o2 = new Int32Array(n * 2); o2.set(out); out = GG.near = o2; } out[n++] = t; } }
+    if (n > 1) out.subarray(0, n).sort(); return n;
   }
   const DUST_DT = 5e-3;   // dust specks are advanced every 5 ms of sim time (they fall ~0.08 mm per update)
   const VL_SKIN = 1e-3, PP_SKIN = 0.25e-3;   // Verlet skins: static-wall lists, pill-pair lists (per pill, m)   // Verlet skin for the static-wall neighbour lists (m)
@@ -960,12 +974,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     // amount (a pending next-feed time of 17 s used to make the motor wait 17 s after Clear / Run trial)
     sim.rebaseClock = function () { const T0 = sim.t, sh = x => x - T0, C = sim.ctrl;
       if (C) { C.tNext = Math.max(0, sh(C.tNext)); C.tStop = sh(C.tStop); C.tExit = sh(C.tExit); C.tOut = sh(C.tOut); if (C.gClr >= 0) C.gClr = Math.max(0, sh(C.gClr));
-        for (const f of C.feeds) { f.t0 = sh(f.t0); f.tLast = sh(f.tLast ?? f.t0); if (f.tDet >= 0) f.tDet = sh(f.tDet); if (f.tStop >= 0) f.tStop = sh(f.tStop); f.times = f.times.map(sh); }
-        for (const x of C.sensors) { x.tOn = sh(x.tOn); for (let k = 0; k < x.q.length; k += 2) x.q[k] = sh(x.q[k]); x.times = x.times.map(sh); }
+        for (const f of C.feeds) { f.t0 = sh(f.t0); f.tLast = sh(f.tLast ?? f.t0); if (f.tDet !== -1) f.tDet = sh(f.tDet); if (f.tStop !== -1) f.tStop = sh(f.tStop); f.times = f.times.map(sh); }
+        for (const x of C.sensors) { x.tOn = sh(x.tOn); if (x.offAt != null) x.offAt = sh(x.offAt); for (let k = 0; k < x.q.length; k += 2) x.q[k] = sh(x.q[k]); x.times = x.times.map(sh); }
+        if (C.lT != null) C.lT = sh(C.lT); if (C.s2OpenAt != null) C.s2OpenAt = sh(C.s2OpenAt); if (C.tS2clr != null) C.tS2clr = sh(C.tS2clr); if (C.lastTb != null) C.lastTb = sh(C.lastTb);
         C.outN = C.exitN; C.held = 0; C.snap = false; C.snapPend = false; C.s2q.length = 0; C.closeAt = null; C.awaitClear = false; C.awaitS3 = null; C.s3cur = null; C.p1q.length = 0; if (C.state === 'clearing') C.state = 'idle'; C.reject = null;   /* new / cleared lot */ if (C.state === 'release') C.state = 'idle'; }   // the pills that were on their way are gone
       if (sim.dustFx) { const t = sim.dustFx.t; for (let k = 0; k < t.length; k++) if (t[k] >= 0) t[k] -= T0; }
+      if (sim._dU != null) sim._dU = sh(sim._dU);   // last dust update: else the dust froze until the new clock caught up
       if (sim.stats.sqPkT != null) sim.stats.sqPkT = sh(sim.stats.sqPkT); };
-    sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.dustEsc = 0; sim.stats.dustT = {}; sim.stats.delivered = 0; sim.stats.escaped = 0; sim.stats.gateOpenS = 0; if (clearFoam) sim.resetFoam(); };
+    sim.reset = function (clearFoam) { sim.rebaseClock(); sim.bodies = newBodies(); sim._ppr = sim._ppc = sim._vl = null; sim.t = 0; sim.steps = 0; sim.stats.exits.length = 0; sim.stats.dispensed = 0; sim.stats.lost = 0; sim.stats.sqPk = 0; sim.stats.prPk = 0; sim.stats.dust = 0; sim.stats.dustBy = [0, 0, 0]; sim.stats.dustEsc = 0; sim.stats.dustT = {}; sim.stats.delivered = 0; sim.stats.escaped = 0; sim.stats.gateOpenS = 0; if (clearFoam) sim.resetFoam(); };
     sim.resetFoam = function () { for (let b = 0; b < 2; b++) { sim.cells.perm[b].fill(0); sim.cells.vis[b].fill(0); sim.cells.dent[b].fill(0); sim.cells.dust[b].fill(0); } sim.wearT = 0; };
     { let zmin = 0; for (const p of cad.parts) if (p.role === 'shell') { const v = p.vArr || new Float32Array(b64bytes(p.v).slice().buffer); for (let k = 2; k < v.length; k += 3) if (v[k] < zmin) zmin = v[k]; } sim.floorZ = zmin < 0 ? zmin * 1e-3 - 5e-3 : 0; sim.floorZ0 = sim.floorZ; }   // pills leave the model 5 mm below the lowest shell surface
     sim.dustFx = { cap: 20000, head: 0, rs: 12345, acc: 0, per: 1e-10, x: new Float32Array(20000), y: new Float32Array(20000), z: new Float32Array(20000), t: new Float32Array(20000).fill(-99), w: new Uint8Array(20000), ty: new Uint8Array(20000) };
@@ -993,6 +1009,20 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       dm: new Float64Array(cap), aS: new Float64Array(cap), aF: new Float64Array(cap), sq: new Float64Array(cap), sqPk: new Float64Array(cap), pr: new Float64Array(cap), prPk: new Float64Array(cap), xiF: new Float64Array(cap * 64 * 2 * 3), xiS: new Int32Array(cap * 64 * 2).fill(-9), xiW: new Float64Array(cap * 64 * 3), xiWS: new Int32Array(cap * 64).fill(-9), xiK: new Float64Array(cap * 64 * 3), xiKS: new Int32Array(cap * 64).fill(-9) };
   }
 
+  /* next body slot for a new pill: append while the table has room, then reuse the slot of a pill that has left (alive 0).
+     Every per-pill field and per-slot contact state is reset; ids stay unique (B.seq), so the id-keyed caches (pair lists,
+     wall lists, dust) see a new pill. -1 = all 400 slots hold live pills. */
+  function pillSlot(sim, B) {
+    if (B.n < B.cap) return B.n++;
+    let k = 0; while (k < B.n && B.alive[k]) k++; if (k >= B.n) return -1;
+    B.fx[k] = B.fy[k] = B.fz[k] = B.tx[k] = B.ty[k] = B.tz[k] = 0; B.nc[k] = B.ncp[k] = 0;
+    B.lS[k] = B.lX[k] = B.lY[k] = B.lZ[k] = B.pM[k] = B.dm[k] = B.aS[k] = B.aF[k] = B.sq[k] = B.sqPk[k] = B.pr[k] = B.prPk[k] = 0;
+    B.xiF.fill(0, k * 384, (k + 1) * 384); B.xiS.fill(-9, k * 128, (k + 1) * 128); B.xiW.fill(0, k * 192, (k + 1) * 192); B.xiWS.fill(-9, k * 64, (k + 1) * 64); B.xiK.fill(0, k * 192, (k + 1) * 192); B.xiKS.fill(-9, k * 64, (k + 1) * 64);
+    if (B.crossed) B.crossed[k] = 0; if (B.hole) B.hole[k] = 0;
+    if (B.ppx) for (const pk of B.ppx.keys()) { const a = Math.floor(pk / 2097152), b = Math.floor(pk / 64) % 512; if (a === k || b === k) B.ppx.delete(pk); }   // pill-pill stick springs: key ((i*64+si)*512+j)*64+sj
+    if (sim.xp) for (const p of sim.xp) if (p.xB === B && p.xs) p.xs.fill(-9, k * 64, (k + 1) * 64);
+    return k;
+  }
   function addPills(sim, n, region) {
     const B = sim.bodies, T = sim.pillType, R = sim.rand;
     if (!region && !sim.cad.spawn && sim.hopFollow && !isDefaultGeom(sim.geom)) {   // built-in drop zone rides with the container
@@ -1003,10 +1033,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const d = T.brad * 2.1 + 0.4e-3;
     if (region.segs) return addPillsInSection(sim, n, region, d);
     const nx = Math.max(1, Math.floor((region.x[1] - region.x[0]) / d)), ny = Math.max(1, Math.floor((region.y[1] - region.y[0]) / d));
-    let added = 0, layer = 0;
-    while (added < n && B.n < B.cap) {
-      for (let i = 0; i < nx && added < n; i++) for (let j = 0; j < ny && added < n && B.n < B.cap; j++) {
-        const k = B.n++; B.alive[k] = 1; B.type[k] = T; B.id[k] = B.seq++;
+    let added = 0, layer = 0, full = false;
+    while (added < n && !full) {
+      for (let i = 0; i < nx && added < n && !full; i++) for (let j = 0; j < ny && added < n; j++) {
+        const k = pillSlot(sim, B); if (k < 0) { full = true; break; } B.alive[k] = 1; B.type[k] = T; B.id[k] = B.seq++;
         B.px[k] = region.x[0] + (i + 0.5 + (R() - 0.5) * 0.3) * (region.x[1] - region.x[0]) / nx;
         B.py[k] = region.y[0] + (j + 0.5 + (R() - 0.5) * 0.3) * (region.y[1] - region.y[0]) / ny;
         B.pz[k] = region.z[0] + layer * d + R() * 1e-3;
@@ -1034,10 +1064,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       if (dist(x, y) > clr && ray(x, y, 1, 0) && ray(x, y, -1, 0) && ray(x, y, 0, 1) && ray(x, y, 0, -1)) pts.push([x, y]);
     sim.stats.spawnSlots = pts.length;
     if (!pts.length) return addPills(sim, n, { x: [6e-3, 39e-3], y: [40e-3, 64e-3], z: [118e-3, 400e-3] });
-    let added = 0, layer = 0;
-    while (added < n && B.n < B.cap) {
-      for (const [x, y] of pts) { if (added >= n || B.n >= B.cap) break;
-        const k = B.n++; B.alive[k] = 1; B.type[k] = T; B.id[k] = B.seq++;
+    let added = 0, layer = 0, full = false;
+    while (added < n && !full) {
+      for (const [x, y] of pts) { if (added >= n) break; const k = pillSlot(sim, B); if (k < 0) { full = true; break; }
+        B.alive[k] = 1; B.type[k] = T; B.id[k] = B.seq++;
         B.px[k] = x + (R() - 0.5) * 0.3 * d * 0.3; B.py[k] = y + (R() - 0.5) * 0.3 * d * 0.3; B.pz[k] = region.z[0] + layer * d + R() * 1e-3;
         const a = R() * 2 - 1, b = R() * 2 - 1, c = R() * 2 - 1, e = R() * 2 - 1, nn = Math.hypot(a, b, c, e) || 1;
         B.q[k * 4] = a / nn; B.q[k * 4 + 1] = b / nn; B.q[k * 4 + 2] = c / nn; B.q[k * 4 + 3] = e / nn;
@@ -1305,7 +1335,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const dm = fri * DUST_KAPPA * E, st = sim.stats; B.dm[i] += dm; st.dust += dm; st.dustBy[where] += dm;
     const mat = B.type[i].spec.mat || 'pressed', T = st.dustT || (st.dustT = {}); (T[mat] || (T[mat] = { shed: 0, esc: 0 })).shed += dm;
     if (belt >= 0) sim.cells.dust[belt][cell] += dm;
-    const D = sim.dustFx; if (!D) return; D.acc += dm;
+    const D = sim.dustFx; if (!D) return; D.acc += dm; D.made = true;
     while (D.acc >= D.per) { D.acc -= D.per; const k = D.head; D.head = (D.head + 1) % D.cap;
       // static: a fresh speck is pulled onto a nearby recent one (the clumps then fall and land together)
       let cx = x, cy = y, cz = z; const ks = dustAgg(sim); D.rs = (D.rs * 1664525 + 1013904223) >>> 0;
@@ -1325,14 +1355,19 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   // zone: 'entry' = across the belt gap at the top of the conveyor (pos_mm up the incline from the top idler axis),
   // 'exit' = in the exit chute (below_mm down the incline from the bottom idler axis), 'gate' = under the slide gate,
   // horizontal beam pos_mm below the gate's underside (z = -2 mm) across the drop hole (y 5-35 mm)
-  function sensorGeom(sim, sn) {
+  function sensorGeom(sim, sn, out) {   // out (optional): { p: [3], d: [3] } filled in place instead of a new object
     const fb = sn.axis === 'frontback', sdm = (sn.side_mm || 0) * 1e-3, O = sim.O, EX = sim.EX, EU = sim.EU, EV = sim.EV, zone = sn.zone || 'exit';
+    if (out) { const p = out.p, d = out.d; out.half = (sn.half_mm || 15) * 1e-3;
+      if (zone === 'gate') { p[0] = O[0] + sim.XB * 0.5 + (fb ? sdm : 0); p[1] = 20e-3 + (fb ? 0 : sdm); p[2] = -2e-3 - (sn.pos_mm ?? 4) * 1e-3; d[0] = fb ? 0 : 1; d[1] = fb ? 1 : 0; d[2] = 0; return out; }
+      const x = sim.XB * 0.5 + (fb ? sdm : 0), u = zone === 'entry' ? sim.U0 + sim.Lc + (sn.pos_mm || 0) * 1e-3 : zone === 'probe' ? sim.U0 + Math.min(sim.Lc, (sn.up_mm ?? 22) * 1e-3) : sim.U0 - (sn.below_mm || 0) * 1e-3, v = sim.W * 0.5 + (fb ? 0 : sdm), D = fb ? EV : EX;
+      for (let k = 0; k < 3; k++) { p[k] = O[k] + x * EX[k] + u * EU[k] + v * EV[k]; d[k] = D[k]; } return out; }
     if (zone === 'gate') return { p: [O[0] + sim.XB * 0.5 + (fb ? sdm : 0), 20e-3 + (fb ? 0 : sdm), -2e-3 - (sn.pos_mm ?? 4) * 1e-3], d: fb ? [0, 1, 0] : [1, 0, 0], half: (sn.half_mm || 15) * 1e-3 };
     const x = sim.XB * 0.5 + (fb ? sdm : 0), u = zone === 'entry' ? sim.U0 + sim.Lc + (sn.pos_mm || 0) * 1e-3 : zone === 'probe' ? sim.U0 + Math.min(sim.Lc, (sn.up_mm ?? 22) * 1e-3) : sim.U0 - (sn.below_mm || 0) * 1e-3, v = sim.W * 0.5 + (fb ? 0 : sdm);
     return { p: [0, 1, 2].map(k => O[k] + x * EX[k] + u * EU[k] + v * EV[k]), d: (fb ? EV : EX).slice(), half: (sn.half_mm || 15) * 1e-3 };
   }
+  const _bg = { p: [0, 0, 0], d: [0, 0, 0], half: 0 }, _brot = [0, 0, 0], _bq = [0, 0, 0, 0];   // beamBlocked scratch
   function beamBlocked(sim, sn) {
-    const g = sensorGeom(sim, sn), B = sim.bodies, rb = (sn.beam_mm || 1) * 5e-4, d = g.d, rot = [0, 0, 0], q = [0, 0, 0, 0];
+    const g = sensorGeom(sim, sn, _bg), B = sim.bodies, rb = (sn.beam_mm || 1) * 5e-4, d = g.d, rot = _brot, q = _bq;
     for (let i = 0; i < B.n; i++) {
       if (!B.alive[i]) continue; const T = B.type[i];
       const wx = B.px[i] - g.p[0], wy = B.py[i] - g.p[1], wz = B.pz[i] - g.p[2], t = wx * d[0] + wy * d[1] + wz * d[2];
@@ -1402,7 +1437,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     else if (!C.gWant && !C.awaitClear && C.awaitS3 == null) tEdge = now + gateBlockTime(g, CATCH_Y_MM);   // already closing / shut
     return { t: now, tArr, tEdge, need: gateBlockTimeOpen(sim), gap: tb - (C.lastTb ?? -1e9), learned: C.tauThr.length >= LEARN_MIN, ok: tEdge + 3e-3 <= tArr };
   }
-  function s2rec(sim, C, sn) { return { tb: sn.tOn, tc: null, L: null }; }
+  function s2rec(sn) { return { tb: sn.tOn, tc: null, L: null }; }
   // a beam cleared. S2: the pill's length is now known -> schedule the gate to start closing when its top is halfway
   // through. S3: learn the exit timing from this pill, and close the gate if it was waiting for S3.
   function fallClear(sim, C) {   // time for a pill whose top just left the S2 beam to fall below the gate (from rest: slow bound)
@@ -1490,11 +1525,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     C.clrNeed = Math.max(0, sim.Lc - uLow) + C.clear_margin_mm * 1e-3;   // back past the top idler into the hopper
     C.clrS0 = sim.S; C.clrPk = sim.S; C.clrT0 = sim.t; C.clrStop = false; C.state = 'clearing';
     if (C.cur) { C.cur.clears = (C.cur.clears || 0) + 1; C.cur.clrWhy = why; }
-    C.clears = (C.clears || 0) + 1; (C.clearLog || (C.clearLog = [])).push({ t: sim.t, why });
+    C.clears = (C.clears || 0) + 1; logPush(C, 'clearLog', { t: sim.t, why });
   }
   // the controller cannot guarantee the dose: tell the host to reject the whole lot and lock dispensing until cleared
+  // debug logs keep only their latest LOG_MAX entries (hours-long runs used to grow them without bound)
+  const LOG_MAX = 200;
+  function logPush(o, k, e) { const L = o[k] || (o[k] = []); L.push(e); if (L.length > LOG_MAX) L.shift(); }
   function lotReject(C, now, why, w, kind) {
-    C.rejects = (C.rejects || 0) + 1; (C.rejectLog || (C.rejectLog = [])).push({ t: now, why });
+    C.rejects = (C.rejects || 0) + 1; logPush(C, 'rejectLog', { t: now, why });
     if (C.lock_on_reject === false) return;   // bench statistics: log it and keep dispensing
     if (!C.reject) C.reject = { t: now, why, win: w || null, kind: kind || 'LOT' };
     C.queue = 0; C.needs.length = 0;
@@ -1528,15 +1566,15 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         // gate open or closing: will the gate edge cross the drop path before this pill reaches the gate?
         const w = catchCheck(sim, C, sn, sn.tOn, now); C.lastWin = w; C.lastTb = sn.tOn;
         if (w.ok) { C.held++; if (G) G.snapped = (G.snapped || 0) + 1; }   // the closing gate will be under it: caught and held
-        else { C.exitN++; C.s2q.push(s2rec(sim, C, sn)); if (G) G.rejected = true;
+        else { C.exitN++; C.s2q.push(s2rec(sn)); if (G) G.rejected = true;
           C.closeAt = null; C.awaitClear = true;   // too close behind: don't close on it -- let it through cleanly, then close
           lotReject(C, now, `double feed — the extra pill reaches the gate ${fmt1(Math.max(0, w.tArr - now) * 1e3)} ms after S2, but the gate can only be across the drop path in ${fmt1(Math.max(0, w.tEdge - now) * 1e3)} ms`, w); }
         return;
       }
-      if (live && F.byOut) { C.exitN++; C.s2q.push(s2rec(sim, C, sn)); C.lastTb = sn.tOn; if (room <= 1 && C.state === 'feeding') { C.state = 'stopping'; C.tStop = now + C.stop_delay_ms * 1e-3; C.awaitClear = true; } return; }   // S3 counts this feed; stop the belts once enough are on their way
+      if (live && F.byOut) { C.exitN++; C.s2q.push(s2rec(sn)); C.lastTb = sn.tOn; if (room <= 1 && C.state === 'feeding') { C.state = 'stopping'; C.tStop = now + C.stop_delay_ms * 1e-3; C.awaitClear = true; } return; }   // S3 counts this feed; stop the belts once enough are on their way
     }
 
-    C.exitN++; C.s2q.push(s2rec(sim, C, sn)); C.lastTb = sn.tOn; if (C.p1q.length) C.p1q.shift();   // heading for the open gate; the Out sensor must see it leave
+    C.exitN++; C.s2q.push(s2rec(sn)); C.lastTb = sn.tOn;   // heading for the open gate; the Out sensor must see it leave (its S1 ledger entry went above)
     if (C.mode !== 'feed') return;
     if (C.cur) { C.cur.n++; C.cur.times.push(now); C.cur.tLast = now; }
     if (C.state === 'feeding' && C.cur.n >= (C.cur.need || 1)) { C.awaitClear = true; C.state = 'stopping'; C.tStop = now + C.stop_delay_ms * 1e-3; C.cur.tDet = now; }   // a feed of N pills runs on until the N-th is counted
@@ -1586,11 +1624,6 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     }
     // backup: belt surface travel measured from the furthest forward point (the forward run coasts down first);
     // the reverse is cut early by its own ramp-down distance so the total reverse travel lands on backup_mm
-    // gate (normally closed): opens the moment a pill is called (feed start) and stays open while the feed runs and until
-    // the Out sensor (under the gate) has seen every pill the exit sensor counted leave, its beam is clear again, and the
-    // close delay has passed. Safety fallback: if a counted pill never reaches the Out sensor (stuck, or two pills fell
-    // through as one beam break) the gate closes gate_wait_s after the last sensor activity and the miss is logged.
-    // With the Out sensor switched off the gate falls back to closing gate_wait_s after the feed ends.
     // gate (normally closed): open for the whole call; after the last called pill clears S2 the controller predicts when
     // its top end is halfway through the gate and starts closing then -- while the pill is still in the air -- so a
     // following double meets a gate that is already on its way shut. S3 only confirms the dose (and catches slips).
@@ -1659,7 +1692,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   }
   function feedStats(sim) {
     const C = sim.ctrl; if (!C) return null; const done = C.feeds.filter((f, i) => i < C.feeds.length - 1 || (C.state === 'idle' && sim.t - f.tStop > 1.0));
-    const ok = done.filter(f => !f.timeout), tt = ok.map(f => f.tDet - f.t0), m = tt.length ? tt.reduce((a, b) => a + b, 0) / tt.length : null;
+    const ok = done.filter(f => !f.timeout && f.tDet !== -1), tt = ok.map(f => f.tDet - f.t0), m = tt.length ? tt.reduce((a, b) => a + b, 0) / tt.length : null;
     const sd = tt.length > 1 ? Math.sqrt(tt.reduce((a, b) => a + (b - m) * (b - m), 0) / (tt.length - 1)) : null;
     // single = exactly the pills asked for, double = more than asked (extra pill), short = some but fewer (timed out)
     return { feeds: done.length, singles: done.filter(f => f.n === (f.need || 1)).length, doubles: done.filter(f => f.n > (f.need || 1)).length, short: done.filter(f => f.n > 0 && f.n < (f.need || 1)).length, caught: done.filter(f => (f.snapped || 0) > (f.slipped || 0)).length, slipped: done.filter(f => f.slipped).length, releases: done.filter(f => f.release).length, release_gate_only: done.filter(f => f.release && !f.belts && f.n >= f.need).length, empties: done.filter(f => f.n === 0).length, timeouts: done.filter(f => f.timeout).length, time_to_pill_mean_s: m, time_to_pill_sd_s: sd, time_to_pill_max_s: tt.length ? Math.max(...tt) : null };
@@ -1743,6 +1776,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (!D.md) Object.assign(D, { md: new Int8Array(cap), g: new Int8Array(cap), b: new Int8Array(cap), s: new Float32Array(cap), v: new Float32Array(cap), S0: new Float64Array(cap), d: new Float64Array(cap), out: new Uint8Array(cap),
       px: new Float64Array(cap), py: new Float64Array(cap), pz: new Float64Array(cap), ly: new Float64Array(cap), ot: new Float64Array(cap), zp: new Float64Array(cap), pi: new Int32Array(cap), pid: new Float64Array(cap), lx: new Float64Array(cap * 3),
       tk: new Float64Array(cap).fill(-1e9), cx: new Float32Array(cap), cy: new Float32Array(cap), cz: new Float32Array(cap), vis: new Uint8Array(cap), ty: D.ty || new Uint8Array(cap), p3: [0, 0, 0] });
+    if (!D.made) return;   // no speck was ever shed: nothing to move (all 20k slots are empty)
     const MV = dustMovers(sim), B = sim.bodies, Sx = sim.S || 0, mats = sim.dustMats || [];
     const put = (k, x, y, z) => { D.cx[k] = x; D.cy[k] = y; D.cz[k] = z; D.vis[k] = 1; };
     const escape = k => { D.md[k] = 6; D.vis[k] = 0; st.dustEsc = (st.dustEsc || 0) + D.per; const m = mats[D.ty[k]] || 'pressed', T = st.dustT || (st.dustT = {}); (T[m] || (T[m] = { shed: 0, esc: 0 })).esc += D.per; };
@@ -1808,7 +1842,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
      horn (crank, r = |C-p2|) drives motion arm 2 (connecting rod, |p2-p1|) pinned through the gate's slot at p1; the
      gate slides along +y in the shell's track to uncover the drop hole. Stroke(angle) is exact geometry. The shell
      sets the limits: the gate tail hits the back wall (y = 97) at link.wall mm of stroke, and the gate's front edge
-     clears the ledge (y = 33) -- fully open hole -- from link.clear mm. Normally closed (angle 0 = the CAD pose). */
+     clears the ledge (y = 33) -- fully open hole -- from link.clear mm. Normally closed at angle g.a0 (0 = the CAD pose only
+     when the production closed edge is the CAD one). */
   function gateStroke(g, ang) { const L = g.link, th = L.th0 + ang, qy = L.C[0] + L.r * Math.cos(th), qz = L.C[1] + L.r * Math.sin(th), h = qz - L.pz;
     return Math.abs(h) > L.Lr ? NaN : qy + Math.sqrt(L.Lr * L.Lr - h * h) - L.p1y; }
   function gateTravelFor(g, mm) { let lo = 0, hi = 120 * PI / 180; for (let k = 0; k < 60; k++) { const m = (lo + hi) / 2; if (gateStroke(g, m) < mm) lo = m; else hi = m; } return (lo + hi) / 2; }
@@ -1902,12 +1937,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const T = B.type[i];
     for (const p of sim.xp) { if (!p.solid) continue; const GG = p.grid;
       if (X < GG.mn[0] - rs || X > GG.mx[0] + rs || Y < GG.mn[1] - rs || Y > GG.mx[1] + rs || Z < GG.mn[2] - rs || Z > GG.mx[2] + rs) continue;
-      const ci = Math.floor((X - GG.mn[0]) / GG.cell), cj = Math.floor((Y - GG.mn[1]) / GG.cell), ck = Math.floor((Z - GG.mn[2]) / GG.cell);
-      if (ci < 0 || cj < 0 || ck < 0 || ci >= GG.dim[0] || cj >= GG.dim[1] || ck >= GG.dim[2]) continue;
-      const list = GG.cells.get((ci * GG.dim[1] + cj) * GG.dim[2] + ck); if (!list) continue;
+      let list, nl;
+      if (rs > GG.margin) { nl = gridNear(GG, X, Y, Z, rs - GG.margin); list = GG.near; if (!nl) continue; }
+      else { const ci = Math.floor((X - GG.mn[0]) / GG.cell), cj = Math.floor((Y - GG.mn[1]) / GG.cell), ck = Math.floor((Z - GG.mn[2]) / GG.cell);
+        if (ci < 0 || cj < 0 || ck < 0 || ci >= GG.dim[0] || cj >= GG.dim[1] || ck >= GG.dim[2]) continue;
+        list = GG.cells.get((ci * GG.dim[1] + cj) * GG.dim[2] + ck); if (!list) continue; nl = list.length; }
       const cp = _cp, bb = GG.bb, zeta = zetaOf(p.rest == null ? T.spec.rest : p.rest), kW = sim.P.contactFreq * sim.P.contactFreq * T.mass, cc = 2 * zeta * Math.sqrt(kW * T.mass);
       let wFn = 0, wPen = -1, wnx = 0, wny = 0, wnz = 0, wrx = 0, wry = 0, wrz = 0, wvx = 0, wvy = 0, wvz = 0;
-      for (let li = 0; li < list.length; li++) { const bo = list[li] * 6;
+      for (let li = 0; li < nl; li++) { const bo = list[li] * 6;
         if (X < bb[bo] - rs || X > bb[bo + 3] + rs || Y < bb[bo + 1] - rs || Y > bb[bo + 4] + rs || Z < bb[bo + 2] - rs || Z > bb[bo + 5] + rs) continue;
         closestPtTri(X, Y, Z, GG.tris, list[li] * 9, cp);
         const dx = X - cp[0], dy = Y - cp[1], dz = Z - cp[2], d2 = dx * dx + dy * dy + dz * dz; if (d2 >= rs * rs || d2 < 1e-18) continue;
@@ -1941,12 +1978,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   }
 
   /* ------------------------------------------------------------------ main step */
-  const CAPS = 8192, KT_W = 900;   // KT_W: tangential contact frequency (rad/s), half the normal one
+  const CAPS = 400 * 64, KT_W = 900;   // CAPS: sphere buffers = 400 bodies x 64 spheres (8192 crashed with 400 big tablets); KT_W: tangential contact frequency (rad/s), half the normal one
   const _sx = new Float64Array(CAPS), _sy = new Float64Array(CAPS), _sz = new Float64Array(CAPS), _sr = new Float64Array(CAPS), _sb = new Int32Array(CAPS), _si = new Int32Array(CAPS);
   const _bst = new Int32Array(1024), _bns = new Int32Array(1024), _bo = new Int32Array(1024), _bx = new Float64Array(1024);   // per-pill sphere ranges + broad phase
   const _svx = new Float64Array(CAPS), _svy = new Float64Array(CAPS), _svz = new Float64Array(CAPS);
-  let _nxt = new Int32Array(CAPS); const _key = new Int32Array(CAPS);
-  let _head = new Int32Array(1 << 16).fill(-1);
   /* Rest (sleeping, as Box2D / Bullet / PhysX put still bodies to sleep): when nothing drives the cartridge (belts stopped,
      vibrator off, both gates still, controller idle) and no pill has drifted more than 10 um over a 0.2 s window, the pile is in equilibrium and the contact solve is skipped -- time, the gates, the controller, the foam's
      dent recovery and the dust carry on. The first step anything drives it again (motor, vibrator, gate, a call, added or
@@ -2120,8 +2155,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
           const sk = VL_SKIN, ex = X - W.x[vk], ey = Y - W.y[vk], ez = Z - W.z[vk];
           if (W.id[vk] !== B.id[i] || W.r[vk] !== rsA || ex * ex + ey * ey + ez * ez > sk * sk) {
             let L = W.L[vk]; if (!L) L = W.L[vk] = new Int32Array(16); let n = 0; const R = rsA + sk, sc = ++W.sc; W.builds++;
-            for (let g = 0; g < 2; g++) { const GG = g === 0 ? G : G2; if (!GG) continue; const st = W.stamp[g], bb = GG.bb;
-              const i0 = Math.max(0, Math.floor((X - sk - GG.mn[0]) / GG.cell)), i1 = Math.min(GG.dim[0] - 1, Math.floor((X + sk - GG.mn[0]) / GG.cell)), j0 = Math.max(0, Math.floor((Y - sk - GG.mn[1]) / GG.cell)), j1 = Math.min(GG.dim[1] - 1, Math.floor((Y + sk - GG.mn[1]) / GG.cell)), k0 = Math.max(0, Math.floor((Z - sk - GG.mn[2]) / GG.cell)), k1 = Math.min(GG.dim[2] - 1, Math.floor((Z + sk - GG.mn[2]) / GG.cell));
+            for (let g = 0; g < 2; g++) { const GG = g === 0 ? G : G2; if (!GG) continue; const st = W.stamp[g], bb = GG.bb, sR = rsA > GG.margin ? sk + (rsA - GG.margin) : sk;   // big spheres reach past the cell margin
+              const i0 = Math.max(0, Math.floor((X - sR - GG.mn[0]) / GG.cell)), i1 = Math.min(GG.dim[0] - 1, Math.floor((X + sR - GG.mn[0]) / GG.cell)), j0 = Math.max(0, Math.floor((Y - sR - GG.mn[1]) / GG.cell)), j1 = Math.min(GG.dim[1] - 1, Math.floor((Y + sR - GG.mn[1]) / GG.cell)), k0 = Math.max(0, Math.floor((Z - sR - GG.mn[2]) / GG.cell)), k1 = Math.min(GG.dim[2] - 1, Math.floor((Z + sR - GG.mn[2]) / GG.cell));
               for (let a = i0; a <= i1; a++) for (let b = j0; b <= j1; b++) for (let c = k0; c <= k1; c++) { const list = GG.cells.get((a * GG.dim[1] + b) * GG.dim[2] + c); if (!list) continue;
                 for (let li = 0; li < list.length; li++) { const t = list[li]; if (st[t] === sc) continue; st[t] = sc; const bo = t * 6;
                   if (X < bb[bo] - R || X > bb[bo + 3] + R || Y < bb[bo + 1] - R || Y > bb[bo + 4] + R || Z < bb[bo + 2] - R || Z > bb[bo + 5] + R) continue;
@@ -2134,6 +2169,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         const gy = gi === 2 ? sim.gate.off : gi === 3 ? sim.safety.off : 0, gv = gi === 2 ? sim.gate.vel : gi === 3 ? sim.safety.vel : 0, Yl = Y - gy;   // gate grid is in its closed pose; it slides along +y
         let list = null, nl = 0;
         if (gi === 1) { list = VL; nl = vlN; }
+        else if (rsA > GG.margin) { nl = gridNear(GG, X, Yl, Z, rsA - GG.margin); list = GG.near; }
         else { const ci = Math.floor((X - GG.mn[0]) / GG.cell), cj = Math.floor((Yl - GG.mn[1]) / GG.cell), ck = Math.floor((Z - GG.mn[2]) / GG.cell);
           if (ci < 0 || cj < 0 || ck < 0 || ci >= GG.dim[0] || cj >= GG.dim[1] || ck >= GG.dim[2]) continue;
           list = GG.cells.get((ci * GG.dim[1] + cj) * GG.dim[2] + ck); nl = list ? list.length : 0; }
@@ -2200,11 +2236,11 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       const wx = B.wx[i], wy = B.wy[i], wz = B.wz[i], q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3], hh = 0.5 * dt;
       const n0 = q0 + hh * (-wx * q1 - wy * q2 - wz * q3), n1 = q1 + hh * (wx * q0 + wy * q3 - wz * q2), n2 = q2 + hh * (wy * q0 + wz * q1 - wx * q3), n3 = q3 + hh * (wz * q0 + wx * q2 - wy * q1);
       const nn = 1 / Math.hypot(n0, n1, n2, n3); B.q[i * 4] = n0 * nn; B.q[i * 4 + 1] = n1 * nn; B.q[i * 4 + 2] = n2 * nn; B.q[i * 4 + 3] = n3 * nn;
-      if (!(B.px[i] === B.px[i]) || !(B.pz[i] === B.pz[i])) { sim.stats.nanFlag = true; B.alive[i] = 0; continue; }
+      if (!(B.px[i] === B.px[i]) || !(B.py[i] === B.py[i]) || !(B.pz[i] === B.pz[i]) || !(nn === nn)) { sim.stats.nanFlag = true; B.alive[i] = 0; continue; }
       const dx = B.px[i] - sim.O[0], dy = B.py[i] - sim.O[1], dz = B.pz[i] - sim.O[2];
       const u = dx * sim.EU[0] + dy * sim.EU[1] + dz * sim.EU[2], v = dx * sim.EV[0] + dy * sim.EV[1] + dz * sim.EV[2], x = dx * sim.EX[0] + dy * sim.EX[1] + dz * sim.EX[2];
       if (!B.crossed) B.crossed = new Uint8Array(B.cap);
-      if (!B.crossed[i] && u < -12e-3) { B.crossed[i] = 1; (sim.stats.crossLog || (sim.stats.crossLog = [])).push([sim.t, x * 1e3, v * 1e3, u * 1e3]); }
+      if (!B.crossed[i] && u < -12e-3) { B.crossed[i] = 1; logPush(sim.stats, 'crossLog', [sim.t, x * 1e3, v * 1e3, u * 1e3]); }
       // v is measured off the tilted back plate: a pill falling straight down from the nip loses ~0.47 mm of v per mm of u,
       // so the window's lower edge follows that fall line (else big pills, which must fall further to clear the line, were 'lost')
       if (B.exitT[i] < 0 && u - sim.U0 < -(sim.Rb + P.thickness + T.brad + 2e-3) && x > -2e-3 && x < 25e-3 + sim.XB && v > -2e-3 + 0.47 * Math.min(0, u - sim.U0 + sim.Rb + P.thickness) && v < sim.W + 3e-3) {
@@ -2212,7 +2248,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       }
       if (sim.xp && B.exitT[i] >= 0 && B.pz[i] < -6e-3) { const H = B.hole || (B.hole = new Int8Array(B.alive.length)); if (!H[i]) H[i] = B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3 ? 1 : 2; }   // with downstream parts: where it crossed the gate plane decides delivered / escaped
       const bx = sim.box;
-      if (B.pz[i] < (sim.floorZ ?? 0) || (bx ? (B.py[i] < bx[2] || B.py[i] > bx[3] || B.px[i] < bx[0] || B.px[i] > bx[1]) : (B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1))) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; (sim.stats.lostLog || (sim.stats.lostLog = [])).push([sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } else if (!sim.gate || (B.hole && B.hole[i] ? B.hole[i] === 1 : (B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3))) sim.stats.delivered = (sim.stats.delivered || 0) + 1; else { sim.stats.escaped = (sim.stats.escaped || 0) + 1; (sim.stats.escLog || (sim.stats.escLog = [])).push([sim.t, B.id[i], B.px[i] * 1e3, B.py[i] * 1e3]); } }   // past the belts: down the drop hole = delivered; anywhere else (e.g. knocked out of the open front by the gate) = escaped
+      if (B.pz[i] < (sim.floorZ ?? 0) || (bx ? (B.py[i] < bx[2] || B.py[i] > bx[3] || B.px[i] < bx[0] || B.px[i] > bx[1]) : (B.py[i] < -0.05 || B.py[i] > 0.2 || B.px[i] < -0.05 || B.px[i] > 0.1))) { B.alive[i] = 0; if (B.exitT[i] < 0) { sim.stats.lost++; logPush(sim.stats, 'lostLog', [sim.t, B.px[i] * 1e3, B.py[i] * 1e3, B.pz[i] * 1e3, B.vx[i], B.vy[i], B.vz[i]]); } else if (!sim.gate || (B.hole && B.hole[i] ? B.hole[i] === 1 : (B.px[i] > 5e-3 && B.px[i] < 40e-3 && B.py[i] > -2e-3 && B.py[i] < 40e-3))) sim.stats.delivered = (sim.stats.delivered || 0) + 1; else { sim.stats.escaped = (sim.stats.escaped || 0) + 1; logPush(sim.stats, 'escLog', [sim.t, B.id[i], B.px[i] * 1e3, B.py[i] * 1e3]); } }   // past the belts: down the drop hole = delivered; anywhere else (e.g. knocked out of the open front by the gate) = escaped
     }
     sim.t += dt; sim.steps++; sim.wearT += dt;
     // pill loads. Squeeze = compressive part of the contact normal forces: (sum |F_n| - |sum F_n|) / 2 -- for a pill
@@ -2233,8 +2269,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       for (let b = 0; b < 2; b++) { const cv = cl.vis[b], tc = cl.touched[b], dn = cl.dent[b]; for (let c = 0; c < cv.length; c++) { if (!tc[c]) cv[c] *= kr; else tc[c] = 0; dn[c] *= kd; } }
     }
   }
-  const createSim2 = createSim;
-  return { createSim: createSim2, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, rayTri, dustUpdate, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
+  return { createSim, gelTackFactor, gateStroke, safetyAutoPush, safetyWidth, gateBlockTimeOpen, exitPlan, exitModel, pctl: (a, p) => pct(a, p), gateTravelFor, rayTri, dustUpdate, dustLand, dustRayY, dustGateDown, dustMovers, beltPoint, newCtrl, newSensor, sensorGeom, triGrid, autoGap, singFrame, dustCover, dustAgg, feedStats, PILL_MATS, DUST_KAPPA, throatMesh, normThroat, THROAT0, frontProfile, uMap, setGeom0, glassMesh, glassBoxes, xformShell, shellMap, shellPart, cutBeltSlot, normGeom, GEOM0, vShift, CSET_T, GLASS, texH, makePillType, foamStress, foamFromPreset, FOAMS, shore00ToE, EToShore00, DEFAULTS, normSpec, buildBeltTables, depthFn, rng, closestPtTri };
 });
 </script>
 <script>/* FoamFeed app: WebGL2 renderer + UI around engine.js (FF) */
@@ -2243,12 +2278,15 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   const FFx = window.FF, CAD = JSON.parse(document.getElementById('cad').textContent);
   const $ = (id) => document.getElementById(id);
   const PI = Math.PI, TAU = 2 * PI;
+  // shared helpers: escHTML for ANY user/file text placed in innerHTML (text and attribute values); freeMesh frees a GL mesh
+  const escHTML = x => String(x ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  function freeMesh(m) { if (!m) return; for (const b of [m.pb, m.nb, m.cb, m.ib]) if (b) gl.deleteBuffer(b); if (m.vao) gl.deleteVertexArray(m.vao); }
 
   /* ---------------------------------------------------------------- state / params */
   const S = {
     foamName: 'Silicone sponge', shore: 40, thick: 4.5, rpm: 12, g: 9.81, speed: 1, dtMode: 1e-4,
     pill: { shape: 'tablet', W: 8, L: 8, T: 3.5, edge: 0.8, density: 1300, muFoam: 0.6, muHard: 0.35, rest: 0.35 },
-    count: 10, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, shellAlpha: 0.12, showHeat: true, camPhase: 0, glass: true, vib: { on: true, freq: 40, accel_g: 0.5, axis: 'plate' },
+    count: 10, paused: false, sectionOn: false, sectionX: 22.5, hopperAlpha: 0.22, shellAlpha: 0.12, showHeat: true, camPhase: 0, camBump: 1, vib: { on: true, freq: 40, accel_g: 0.5, axis: 'plate' },
     geom: { bot: 0, top: 0, W: 8 }, hopFollow: true, wearX: 1, throat: { on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, crushN: null, loadCol: false, dustShow: true, dustTack: true, dustStatic: 1, sing: { on: false, axis: 'v', u_mm: 11, x_mm: 0, v_mm: 0, len_mm: 3, r_mm: 1.5, mu: 0.3 }, ctrl: null,   // belt layout: idler offsets from the CAD (mm), belt width (mm); foam-wear time-lapse
   };
   let sim = null, pending = null;
@@ -2259,21 +2297,23 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (typeof TEX !== 'undefined') TEX.W = S.geom.W * 1e-3;
     sim = FFx.createSim(CAD, { tex: typeof TEX !== 'undefined' ? TEX : null, pill: S.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, params: { restSleep: true, rpm: S.rpm, thickness: S.thick * 1e-3, dt: S.dtMode, wearX: S.wearX } });
     applyParams();
-    if (typeof dustStaticTris !== 'undefined' && dustStaticTris) sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3));
+    dustGridUp();
     if (typeof idleBeltDirty !== 'undefined') idleBeltDirty = true;   // re-freeze the idle belts from the new geometry
     sim.addPills(S.count);
     buildPillMesh();
     stats.reset();
   }
+  // display-only dust collision grid of the hardware (rebuildGLParts drops it; rebuilt lazily)
+  function dustGridUp() { if (sim && !sim.dustGrid && typeof dustStaticTris !== 'undefined' && dustStaticTris) sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3)); }
   function applyParams() {
     if (!sim) return;
     if (typeof TEX !== 'undefined' && sim.cells) applyTex();
     applyVib(); applyTire(); applyHum(); applySing(); xpApply(); sim.P.dustTack = S.dustTack ? 1 : 0; sim.P.dustStatic = S.dustStatic;
-    if (S.ctrl && (S.ctrl.mode === 'feed' || S.ctrl.mode === 'logic') && sim.ctrl) sim.ctrl.rpmRun = S.rpm; else sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1;
+    if (S.ctrl && (S.ctrl.mode === 'feed' || S.ctrl.mode === 'logic') && sim.ctrl) sim.ctrl.rpmRun = S.rpm; else sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1; sim.P.camBump = S.camBump === 0 ? 0 : 1;
     applyCtrl();
   }
   function applyFoam() { // keep wear state, replace material
-    const keep = sim.foam; const f = FFx.foamFromPreset(S.foamName, S.shore);
+    const f = FFx.foamFromPreset(S.foamName, S.shore);
     Object.assign(sim.foam, f, adv);
   }
   const adv = {}; // advanced overrides
@@ -2321,6 +2361,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   gl.useProgram(prog);
   const U = {}; ['uVP', 'uM', 'uCol', 'uUseCol', 'uAlpha', 'uFlat', 'uCam', 'uClip', 'uClipOn', 'uPat'].forEach(n => U[n] = gl.getUniformLocation(prog, n));
   const A = { pos: gl.getAttribLocation(prog, 'aPos'), nrm: gl.getAttribLocation(prog, 'aNrm'), col: gl.getAttribLocation(prog, 'aCol') };
+  // phones drop the GPU context in background tabs: allow restore, then reload (the last setup comes back from the browser copy)
+  cv.addEventListener('webglcontextlost', e => { e.preventDefault(); }, false);
+  cv.addEventListener('webglcontextrestored', () => { location.reload(); }, false);
   gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
   function mkMesh(pos, idx, nrm, col, dynamic) {
@@ -2376,8 +2419,6 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     return v;
   }
   const parts = [];
-  let glassMeshGL = null;
-  function rebuildGlass() { const g = FFx.glassMesh(CAD, simGeom()); glassMeshGL = mkMesh(g.v, g.t, null, null, false); }
   let pivA = wpt(CAD.cam.cx, CAD.cam.cu, 4), pivB = wpt(CAD.cam.cxB, CAD.cam.cuB, 4);
   let wormP = wpt(CAD.worm.c[0], CAD.worm.c[1], CAD.worm.c[2]);
   // a new machine model moves the conveyor frame: re-derive everything the renderer caches from it
@@ -2414,7 +2455,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       const prof = arc(0, -hs, r, -PI / 2, 0, 10).map(([rr, z]) => [Math.max(rr, 0), z]).concat(arc(0, hs, r, 0, PI / 2, 10).map(([rr, z]) => [Math.max(rr, 0), z]));
       g = revolve(prof, 28, true);
     }
-    const mm = mkMesh(g.P, g.I, g.N, null, false); if (!spIn) pillMesh = mm; return mm;
+    const mm = mkMesh(g.P, g.I, g.N, null, false); if (!spIn) { freeMesh(pillMesh); pillMesh = mm; } return mm;
   }
   const pillMeshes = new Map();
   function pillMeshFor(pill) { const T = FFx.makePillType(FFx.normSpec(pill)), key = JSON.stringify(T.spec); let m = pillMeshes.get(key); if (!m) { m = buildPillMesh(T.spec); pillMeshes.set(key, m); } return m; }
@@ -2435,8 +2476,13 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (!idleBelt) { idleBelt = beltMesh.map(m => { const p = m.pos.slice(), c = m.col.slice(), g = mkMesh(p, m.idx, null, c, true); g.pos = p; g.col = c; return g; }); idleBeltDirty = !still; }
     else if (idleBeltDirty && still) { for (let b = 0; b < 2; b++) { const g = idleBelt[b]; g.pos.set(beltMesh[b].pos); g.col.set(beltMesh[b].col); gl.bindVertexArray(g.vao); gl.bindBuffer(gl.ARRAY_BUFFER, g.pb); gl.bufferSubData(gl.ARRAY_BUFFER, 0, g.pos); gl.bindBuffer(gl.ARRAY_BUFFER, g.cb); gl.bufferSubData(gl.ARRAY_BUFFER, 0, g.col); } gl.bindVertexArray(null); idleBeltDirty = false; }
     return idleBelt; }
-  function beltFrame(belt, sig, side) { return null; }
+  // the belt mesh (~27k verts) is only rebuilt when something it shows changed: a sim step (sim.t), a new sim, the heat
+  // toggle, cam bump, or the texture (cells hash + params); plus a 0.5 s refresh for anything else (wear reset while paused)
+  let beltKey = '', beltAt = 0;
+  function beltsKey() { let hc = 0; if (typeof TEX !== 'undefined') { const c = TEX.cells; for (let k = 0; k < c.length; k++) hc = (hc * 31 + c[k]) | 0; }
+    const T = typeof TEX !== 'undefined' ? TEX : {}; return [sim.t, sim.S, sim.thetaLoc[0], sim.thetaLoc[1], S.showHeat, sim.P.camBump, sim.P.thickness, T.active, T.Lt, T.ridge, T.groove, T.hmax, hc].join('|'); }
   function updateBelts() {
+    const key = beltsKey(), now = performance.now(); if (key === beltKey && updateBelts.sim === sim && now - beltAt < 500) return; beltKey = key; beltAt = now; updateBelts.sim = sim;
     const P = sim.P, h = P.thickness * 1e3, Rb = 5, Lc = sim.Lc * 1e3, W = sim.W * 1e3, U0 = sim.U0 * 1e3, tb = sim.tables, cl = sim.cells, Rmid = 5 + 2;
     const per = 2 * Lc + TAU * Rmid;
     for (let b = 0; b < 2; b++) {
@@ -2456,7 +2502,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
         const iq = Math.min(Math.floor(q / (cl.dq * 1e3)), cl.nq - 1);
         // motion stripes: 3 mm light / 3 mm dark, fixed to the belt material, plus one orange marker per loop
         // with a painted texture the ridges/grooves themselves show the motion (no stripes)
-        const band = 0, texOn = TEX.active, lite = (Math.floor(q / 3) & 1) === 0, mark = q < (texOn ? 2 : 6);
+        const texOn = TEX.active, lite = (Math.floor(q / 3) & 1) === 0, mark = q < (texOn ? 2 : 6);
         const paint = (c, hT) => mark ? [1.0, 0.5, 0.08] : texOn ? (hT > 0.02 ? c.map(v => 0.5 + v * 0.5) : hT < -0.02 ? c.map(v => v * 0.45) : c)
           : lite ? c.map(v => 0.55 + v * 0.45) : c.map(v => v * 0.8);
         const tH = vmm => texOn ? FFx.texH(TEX, q * 1e-3, vmm * 1e-3) * 1e3 : 0;
@@ -2465,7 +2511,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
           const set = cl.perm[b][c] + cl.vis[b][c], dent = cl.dent[b][c] * 0.8, disp = h * Math.min(0.9, set + dent) , o = (i * NV + j) * 3;
           const hT = tH(v), dsp = disp - hT;
           put(M.pos, o, xl - nxl * dsp, u - nu * dsp, v);
-          const heat = Math.min(1, set * 3.5), cc = S.showHeat ? [0.17 + heat * 0.8 + band, 0.18 + heat * 0.35 + band, 0.22 - heat * 0.12 + band] : [0.2 + band, 0.2 + band, 0.24 + band];
+          const heat = Math.min(1, set * 3.5), cc = S.showHeat ? [0.17 + heat * 0.8, 0.18 + heat * 0.35, 0.22 - heat * 0.12] : [0.2, 0.2, 0.24];
           const pc = paint(cc, hT); M.col[o] = pc[0] * (1 - dent * 0.4); M.col[o + 1] = pc[1] * (1 - dent * 0.4); M.col[o + 2] = pc[2] * (1 - dent * 0.4);
         }
         for (let sd = 0; sd < 2; sd++) { const o = (NS * NV + sd * NS * 2 + i * 2) * 3, v = sd * W, he = Math.max(0, tH(v)); put(M.pos, o, xl + nxl * he, u + nu * he, v); put(M.pos, o + 3, xl - nxl * h, u - nu * h, v);
@@ -2484,8 +2530,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function setPreset(n) { if (n === 'all') return fitAll(); Object.assign(cam, JSON.parse(JSON.stringify(PRESETS[n]))); }
   // frame the machine plus every imported part (iso angle)
   function fitAll() { let mn = [-5, 0, -10], mx = [50, 110, 190]; const base = Math.hypot(55, 110, 200);
-    { const o = bankOff(BANK.cur), e = bankOff(Math.max(0, BANK.n - 1)), cols = Math.min(BANK.n, BANK.cols); const ex = [(cols - 1) * BANK.pitchX, e[1], 0];   // machine box in bank coordinates (active one at its slot)
-      void o; mx = mx.map((x, a) => x + ex[a]); }
+    { const e = bankOff(Math.max(0, BANK.n - 1)), cols = Math.min(BANK.n, BANK.cols); const ex = [(cols - 1) * BANK.pitchX, e[1], 0];   // machine box in bank coordinates
+      mx = mx.map((x, a) => x + ex[a]); }
     for (const p of (typeof XP !== 'undefined' ? XP : [])) if (p.bb) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], p.bb[0][a]); mx[a] = Math.max(mx[a], p.bb[1][a]); }
     const ext = Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]); Object.assign(cam, { az: -0.6, el: 0.45, d: 240 * Math.max(1, ext / base), t: [0, 1, 2].map(a => (mn[a] + mx[a]) / 2) }); }
   // camera: mouse (left = orbit, right/shift = pan, wheel = zoom) and touch (1 finger = orbit, 2 fingers = pinch zoom + pan)
@@ -2549,11 +2595,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (singGL && sim.sing) draw(singGL, I, [0.95, 0.45, 0.85], 1, false);
     { const Mx = m4.ident(); Mx[12] = -bo[0]; Mx[13] = -bo[1]; Mx[14] = -bo[2];   // imported parts live in bank (world) coordinates
       for (const p of XP) if (p.mesh) { const c = p.col, col = [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16) / 255); if (p.alpha < 0.99) { gl.enable(gl.BLEND); gl.depthMask(false); draw(p.mesh, Mx, col, p.alpha, true); gl.depthMask(true); } else draw(p.mesh, Mx, col, 1, true); } gl.disable(gl.BLEND); }
-    // dust specks: each falls straight down at a settling speed (~15 mm/s) from where it was shed, lands on the first
-    // surface below (wall, plate, hopper, glass or belt -- FFx.dustLand) and sticks; specks on a belt ride with it
     // dust specks: advanced by the engine (FFx.dustUpdate, every 5 ms of sim time); drawn where it left them
     if (S.dustShow && sim.dustFx) { const Dx = sim.dustFx; let n = 0;
-      if (!sim.dustGrid && dustStaticTris) { sim.dustGrid = dustStaticTris.grid || (dustStaticTris.grid = FFx.triGrid(dustStaticTris.tris, 6e-3, 4e-3)); }
+      dustGridUp();
       if (!Dx.md) FFx.dustUpdate(sim);
       if (!dustGL || dustGL.cap !== Dx.cap) { dustGL = { cap: Dx.cap, buf: new Float32Array(Dx.cap * 3), vao: gl.createVertexArray(), pb: gl.createBuffer() }; gl.bindVertexArray(dustGL.vao); gl.bindBuffer(gl.ARRAY_BUFFER, dustGL.pb); gl.bufferData(gl.ARRAY_BUFFER, dustGL.buf.byteLength, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0); gl.disableVertexAttribArray(A.nrm); gl.disableVertexAttribArray(A.col); gl.bindVertexArray(null); }
       const Gd = dustGL; for (let k = 0; k < Dx.cap; k++) if (Dx.vis[k]) { const o = n * 3; Gd.buf[o] = Dx.cx[k] * 1e3; Gd.buf[o + 1] = Dx.cy[k] * 1e3; Gd.buf[o + 2] = Dx.cz[k] * 1e3; n++; }
@@ -2586,7 +2630,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const G = ghostMesh(), IB = idleBelts(); gl.disable(gl.BLEND);
     for (let k = 0; k < BANK.n; k++) { if (k === BANK.cur) continue; const o = bankOff(k), M = m4.ident(); M[12] = o[0] - bo[0]; M[13] = o[1] - bo[1]; M[14] = o[2] - bo[2];
       if (G) draw(G, M, ROLECOL.static, 1, true); draw(IB[0], M, [1, 1, 1], 1, true); draw(IB[1], M, [1, 1, 1], 1, true);
-      const u = BANK.units[k], sn = u && u.snap; if (sn && sn.p.length) { const pm = pillMeshFor(u.pill);
+      const u = BANK.units[k], sn = u && u.snap; if (sn && sn.p.length) { if (u._pmFor !== u.pill) { u._pm = pillMeshFor(u.pill); u._pmFor = u.pill; } const pm = u._pm;
         for (const q of sn.p) { const Mp = m4.fromQP([q[3], q[4], q[5], q[6]], [q[0] * 1e3 + M[12], q[1] * 1e3 + M[13], q[2] * 1e3 + M[14]]); draw(pm, Mp, hsv(q[7]), 1, false, true); } } }
     gl.enable(gl.BLEND); gl.depthMask(false);
     for (let k = 0; k < BANK.n; k++) { if (k === BANK.cur) continue; const o = bankOff(k), M = m4.ident(); M[12] = o[0] - bo[0]; M[13] = o[1] - bo[1]; M[14] = o[2] - bo[2];
@@ -2693,7 +2737,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function finishTrial() {
     const st = stats.compute(), cl = sim.cells; let sumS = 0, cnt = 0; for (let b = 0; b < 2; b++) for (let c = 0; c < cl.perm[b].length; c++) { sumS += cl.perm[b][c] + cl.vis[b][c]; cnt++; }
     trialRows.unshift({ cfg: `${S.foamName} S${S.shore} h${S.thick} @${S.rpm}rpm · ${S.pill.shape} ${S.pill.W}${S.pill.shape === 'tablet' || S.pill.shape === 'sphere' ? '' : '×' + S.pill.L} μ${S.pill.muFoam}`, n: st.total, of: S.count, rate: st.rate, cv: st.cv, dbl: st.doubles, esc: sim.stats.lost, set: sumS / cnt * 100 });
-    $('trialTab').innerHTML = '<tr><th>setup</th><th>out</th><th>/min</th><th>CV</th><th>dbl</th><th>esc</th><th>set%</th></tr>' + trialRows.slice(0, 12).map(r => `<tr><td>${r.cfg}</td><td>${r.n}/${r.of}</td><td>${fmt(r.rate, 0)}</td><td>${fmt(r.cv * 100, 0)}%</td><td>${r.dbl}</td><td>${r.esc}</td><td>${fmt(r.set, 2)}</td></tr>`).join('');
+    $('trialTab').innerHTML = '<tr><th>setup</th><th>out</th><th>/min</th><th>CV</th><th>dbl</th><th>esc</th><th>set%</th></tr>' + trialRows.slice(0, 12).map(r => `<tr><td>${escHTML(r.cfg)}</td><td>${escHTML(r.n)}/${escHTML(r.of)}</td><td>${fmt(r.rate, 0)}</td><td>${fmt(r.cv * 100, 0)}%</td><td>${r.dbl}</td><td>${r.esc}</td><td>${fmt(r.set, 2)}</td></tr>`).join('');
     $('btnRun').textContent = 'Run trial'; trial = null;
   }
   $('btnRun').onclick = () => { if (trial) { trial = null; $('btnRun').textContent = 'Run trial'; return; } sim.reset(false); sim.addPills(S.count); trial = { T: +$('trialT').value }; };
@@ -2701,7 +2745,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     requestAnimationFrame(frame);
     if (pending && now > pending.at) { const p = pending; pending = null; p.fn(); }
     if (trial) { const t0 = performance.now(); while (performance.now() - t0 < 30 && sim.t < trial.T) sim.step(10); $('btnRun').textContent = `Running… ${fmt(sim.t, 0)}/${trial.T} s (click to stop)`; if (sim.t >= trial.T) finishTrial(); }
-    else if (S.paused || trial) { frame.last = null; frame.acc = 0; }
+    else if (S.paused) { frame.last = null; frame.acc = 0; }
     if (!trial && !S.paused) {
       // paced by wall-clock time, not frame count: sim time owed = Speed x real time since the last frame (so a 144/240 Hz
       // display or a light scene can't run faster than the slider). If the physics can't keep up, the debt is capped at
@@ -2721,18 +2765,17 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 
   /* ---------------------------------------------------------------- UI wiring */
   const FOAM_NAMES = Object.keys(FFx.FOAMS);
-  $('foamType').innerHTML = FOAM_NAMES.map(n => `<option>${n}</option>`).join('');
+  $('foamType').innerHTML = FOAM_NAMES.map(n => `<option>${escHTML(n)}</option>`).join('');
   const SHAPES = { tablet: 'Round tablet (rounded disc)', capsule: 'Caplet / capsule', sphere: 'Sphere (round bead)', ellipsoid: 'Oval / softgel (ellipsoid)' };
   $('shape').innerHTML = Object.entries(SHAPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   const PILLS = { 'Round tablet 8 × 3.5': { shape: 'tablet', W: 8, T: 3.5, edge: 0.8, density: 1300 }, 'Small tablet 5 × 2': { shape: 'tablet', W: 5, T: 2, edge: 0.8, density: 1300 }, 'Large tablet 12 × 5': { shape: 'tablet', W: 12, T: 5, edge: 0.6, density: 1400 }, 'Caplet 16 × 6.5': { shape: 'capsule', L: 16, W: 6.5, density: 1300 }, 'Softgel 14 × 8': { shape: 'ellipsoid', L: 14, W: 8, T: 7, density: 1100, mat: 'softgel' }, 'Round bead Ø6': { shape: 'sphere', W: 6, density: 1200, mat: 'coated' }, 'Gel cap 19 × 7.5': { shape: 'capsule', L: 19, W: 7.5, density: 1050, mat: 'gelcap' } };
   // user-saved pills (kept in this browser): listed with a star in the preset menu and the dispenser bank's pill menu
   const UPK = 'ffPills1', BUILTIN_PILLS = new Set(Object.keys(PILLS));
   const loadUserPills = () => { let u = {}; try { u = JSON.parse(localStorage.getItem(UPK) || '{}') || {}; } catch (e) {} for (const k of Object.keys(PILLS)) if (!BUILTIN_PILLS.has(k)) delete PILLS[k]; for (const [k, v] of Object.entries(u)) PILLS['★ ' + k] = v; return u; };
-  const pillMenus = () => { const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;'); const o = Object.keys(PILLS).map(n => `<option>${esc(n)}</option>`).join('');
+  const pillMenus = () => { const o = Object.keys(PILLS).map(n => `<option>${escHTML(n)}</option>`).join('');
     $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + o; const bp = $('bkPill'); if (bp) bp.innerHTML = '<option value="">change pill…</option>' + o; };
-  loadUserPills();
-  $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
-  setTimeout(pillMenus, 0);
+  loadUserPills(); pillMenus();
+  setTimeout(pillMenus, 0);   // again once app_part2 has filled #bkPill
   $('pillSave').onclick = () => { const u = loadUserPills(), p = S.pill, def = p.name || `${p.shape} ${p.shape === 'tablet' || p.shape === 'sphere' ? p.W : p.L + ' × ' + p.W} mm`;
     const name = (prompt('Name for this pill (it will appear in the pill presets list):', def) || '').trim(); if (!name) return;
     if (u[name] && !confirm(`Replace your saved pill "${name}"?`)) return;
@@ -2748,13 +2791,15 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     S.geom = Object.assign({ bot: 0, top: 0, W: 8 }, S.geom || {}); for (const [id, k] of [['geoBot', 'bot'], ['geoTop', 'top'], ['geoW', 'W']]) { $(id).value = S.geom[k]; $(id + 'V').textContent = S.geom[k]; } $('wearX').value = String(S.wearX || 1); $('hopFollow').checked = S.hopFollow !== false; syncCtrlUI(); $('shellA').value = S.shellAlpha ?? 0.12; $('hopA').value = S.hopperAlpha; if (sim) $('crushN').value = S.crushN > 0 ? S.crushN : defaultCrush(sim.pillType.spec); $('loadCol').checked = !!S.loadCol; S.throat = Object.assign({ on: false, width: 39, sideDeg: 0, depth: 9, frontDeg: 41 }, S.throat || {}); $('thOn').checked = !!S.throat.on; for (const [id, k] of [['thW', 'width'], ['thSide', 'sideDeg'], ['thDepth', 'depth'], ['thFront', 'frontDeg']]) { $(id).value = S.throat[k]; $(id + 'V').textContent = S.throat[k]; } if (typeof thInfo === 'function') thInfo(); if (typeof geoInfo === 'function') geoInfo();
     $('foamType').value = S.foamName; $('shore').value = S.shore; $('thick').value = S.thick; $('rpm').value = S.rpm; $('grav').value = S.g; $('speed').value = S.speed;
     $('shape').value = S.pill.shape; $('pW').value = S.pill.W; $('pL').value = S.pill.L; $('pT').value = S.pill.T; $('pEdge').value = S.pill.edge; $('pDen').value = S.pill.density; $('pMuF').value = S.pill.muFoam; $('pMuH').value = S.pill.muHard; $('pRest').value = S.pill.rest; { const M = FFx.PILL_MATS[S.pill.mat || 'pressed']; $('pMat').value = S.pill.mat || 'pressed'; $('pFri').value = (S.pill.fri != null ? S.pill.fri : M.fri) * 100; $('pTack').value = S.pill.tack != null ? S.pill.tack : M.tack; } $('count').value = S.count;
-    $('camPhase').value = S.camPhase;
+    $('camPhase').value = S.camPhase; $('camBump').checked = S.camBump !== 0;
+    $('dtSel').value = String(S.dtMode); $('secOn').checked = !!S.sectionOn; $('secX').value = S.sectionX; $('heat').checked = S.showHeat !== false; $('dustShow').checked = S.dustShow !== false;
+    $('btnPause').textContent = S.paused ? '▶ Resume' : '⏸ Pause';
     const sp = S.pill.shape; $('rowL').style.display = (sp === 'capsule' || sp === 'ellipsoid') ? '' : 'none'; $('rowT').style.display = (sp === 'tablet' || sp === 'ellipsoid') ? '' : 'none'; $('rowEdge').style.display = sp === 'tablet' ? '' : 'none';
     $('pWlab').textContent = sp === 'ellipsoid' ? 'Width (mm)' : (sp === 'tablet' || sp === 'sphere' ? 'Diameter (mm)' : 'Diameter (mm)');
     for (const el of document.querySelectorAll('input[type=range]')) { const o = $(el.id + 'V'); if (o) o.textContent = (+el.value).toString(); }
     const f = sim ? sim.foam : null; if (f) { ['epsY', 'kc', 'cset', 'tauRec', 'H', 'tauV', 'grip', 'adh', 'eps1', 'epsD'].forEach(k => { const e = $('a_' + k); if (e) { e.value = f[k]; const o = $('a_' + k + 'V'); if (o) o.textContent = (+f[k]).toString(); } }); }
   }
-  function hook(id, fn, live) { $(id).addEventListener('input', () => { fn($(id).value); const o = $(id + 'V'); if (o) o.textContent = $(id).value; }); }
+  function hook(id, fn) { $(id).addEventListener('input', () => { fn($(id).value); const o = $(id + 'V'); if (o) o.textContent = $(id).value; }); }
   hook('foamType', v => { S.foamName = v; S.shore = FFx.FOAMS[v].S; for (const k in adv) delete adv[k]; applyFoam(); syncUI(); });
   hook('shore', v => { S.shore = +v; for (const k of ['E']) delete adv[k]; applyFoam(); });
   hook('thick', v => { S.thick = +v; applyParams(); geoInfo(); if (typeof thickFlag === 'function') thickFlag(); });
@@ -2765,7 +2810,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   }
   function applyGeom() {
     const hp = CAD.parts.find(p => p.id === 'user_hopper'); if (hp) CAD.spawn = spawnFrom(S.hopFollow ? FFx.xformShell(hp.vArr, CAD, simGeom(), true) : hp.vArr, hp.tArr);
-    rebuildGLParts(); rebuildGlass(); newSim(); applyTex(); geoInfo(); }
+    rebuildGLParts(); newSim(); applyFoam(); applyTex(); geoInfo(); }
   $('hopFollow').onchange = () => { S.hopFollow = $('hopFollow').checked; applyGeom(); };
   function thInfo() {
     const t = S.throat, hop = CAD.parts.find(p => p.role === 'hopper'), up = hop && hop.id !== '021_00';
@@ -2889,10 +2934,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     $('r_ct').textContent = C.reject ? 'LOCKED — lot rejected' : C.mode === 'logic' ? 'custom logic' + (C.logicErr ? ' · error' : '') : C.mode !== 'feed' ? 'continuous · belts running' : C.state === 'release' ? (C.tRel < 0 ? 'releasing held pill — opening gate only' : `releasing held pill — gate open, belts start in ${fmt(Math.max(0, C.release_wait_s - (sim.t - C.tRel)), 1)} s if S3 sees nothing`) : C.state === 'feeding' && sim.gate && C.wait_gate && sim.P.rpm === 0 && sim.gate.ang < sim.gate.travel - 1e-6 && !sim.gate.stall ? 'opening gate — belts start when open' : C.state === 'feeding' ? `FEEDING${C.cur.need > 1 ? ' pill ' + Math.min(C.cur.n + 1, C.cur.need) + ' of ' + C.cur.need : ''} ${fmt(sim.t - C.cur.t0, 1)} s · ${fmt(Math.abs(P.rpm), 0)} rpm${C.queue ? ' · ' + C.queue + ' queued' : ''}` : C.state === 'stopping' ? 'pill seen — stopping' : C.state === 'clearing' ? `double at S1 — reversing into hopper ${fmt((C.cur && C.cur.cleared || 0) * 1e3, 1)} / ${fmt(C.clrNeed * 1e3, 1)} mm (try ${C.cur ? C.cur.clears : 1})` : C.state === 'backup' ? `backing up ${fmt((C.cur && C.cur.backed || 0) * 1e3, 1)} / ${fmt(C.backup_mm, 1)} mm` : `stopped${C.queue ? ' · next in ' + fmt(Math.max(0, C.tNext - sim.t), 1) + ' s (' + C.queue + ' queued)' : ' · ready'}${P.rpm !== 0 ? ' (ramping down)' : ''}`;
     $('r_ct').style.color = C.state === 'feeding' ? '#7d9' : C.state === 'stopping' || C.state === 'backup' ? '#fc6' : '';
     { const nm = { entry: 'Entry', probe: 'Probe', exit: 'Exit', gate: 'Out' }; $('r_sens').textContent = C.sensors.map((x, i) => x.on ? `${nm[x.zone] || 'S' + (i + 1)}${i === C.trigger ? '*' : ''} ${x.out ? '■' : '□'} ${x.count}` : null).filter(Boolean).join(' · ') || 'none on'; }
-    if (sim.gate) { const g = sim.gate, L = g.link, s_ = g.off * 1e3 - (g.base || 0), deg = (g.ang - (g.a0 || 0)) * 180 / PI, mov = Math.abs(g.vel) > 1e-5, cl = false;
+    if (sim.gate) { const g = sim.gate, L = g.link, s_ = g.off * 1e3 - (g.base || 0), deg = (g.ang - (g.a0 || 0)) * 180 / PI, mov = Math.abs(g.vel) > 1e-5;
       let onG = 0; const Bb = sim.bodies; for (let i = 0; i < Bb.n; i++) if (Bb.alive[i] && Bb.exitT[i] >= 0) onG++;
-      $('r_gate').textContent = (g.stall ? 'STALLED on back wall · ' : mov ? (g.open ? 'opening · ' : 'closing · ') : g.ang - (g.a0 || 0) < 1e-4 ? 'closed · ' : g.open ? 'open · ' : '') + `${fmt(deg, 0)}° · ${fmt(s_, 1)} mm` + (onG ? ` · ${onG} pill${onG === 1 ? '' : 's'} below belts` : '') + (cl && g.open && !mov ? ' · hole not fully clear' : '') + ` · ${sim.stats.delivered || 0} delivered` + (sim.stats.delivered ? ` · open ${fmt((sim.stats.gateOpenS || 0) / sim.stats.delivered * 1e3, 0)} ms/dose` : '') + (sim.stats.escaped ? ` · ${sim.stats.escaped} knocked out (not via hole)` : '') + (C.mode === 'feed' && C.exitN > C.outN ? ` · waiting for ${C.exitN - C.outN} at Out` : '') + (C.gMiss ? ` · ${C.gMiss} missed by Out` : '') + (C.snap ? ' · SNAPPED SHUT (double)' : '') + (C.held ? ` · ${C.held} extra held on gate (next dose)` : '') + (C.leaks ? ` · ${C.leaks} slipped past the snapped gate (counted dispensed)` : '');
-      $('r_gate').style.color = g.stall ? '#f66' : (cl && g.open && !mov) ? '#fc6' : g.ang - (g.a0 || 0) > 1e-4 ? '#7d9' : ''; }
+      $('r_gate').textContent = (g.stall ? 'STALLED on back wall · ' : mov ? (g.open ? 'opening · ' : 'closing · ') : g.ang - (g.a0 || 0) < 1e-4 ? 'closed · ' : g.open ? 'open · ' : '') + `${fmt(deg, 0)}° · ${fmt(s_, 1)} mm` + (onG ? ` · ${onG} pill${onG === 1 ? '' : 's'} below belts` : '') + ` · ${sim.stats.delivered || 0} delivered` + (sim.stats.delivered ? ` · open ${fmt((sim.stats.gateOpenS || 0) / sim.stats.delivered * 1e3, 0)} ms/dose` : '') + (sim.stats.escaped ? ` · ${sim.stats.escaped} knocked out (not via hole)` : '') + (C.mode === 'feed' && C.exitN > C.outN ? ` · waiting for ${C.exitN - C.outN} at Out` : '') + (C.gMiss ? ` · ${C.gMiss} missed by Out` : '') + (C.snap ? ' · SNAPPED SHUT (double)' : '') + (C.held ? ` · ${C.held} extra held on gate (next dose)` : '') + (C.leaks ? ` · ${C.leaks} slipped past the snapped gate (counted dispensed)` : '');
+      $('r_gate').style.color = g.stall ? '#f66' : g.ang - (g.a0 || 0) > 1e-4 ? '#7d9' : ''; }
     { const sf = sim.safety, el = $('r_safety');
       if (!sf) { el.textContent = 'not in this model (import one with a part tagged “Pill width safety gate”)'; el.style.color = ''; }
       else { const mm = x => fmt(x * 1e3, 1), sp = sim.pillSpec || {}, back = Math.max(sp.W || 8, sp.L || 8, sp.T || 0) * 0.5e-3, mov = Math.abs(sf.vel) > 1e-5;
@@ -2959,27 +3004,40 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('btnTrial').onclick = () => { sim.reset(false); sim.addPills(S.count); };
   document.querySelectorAll('[data-cam]').forEach(b => b.onclick = () => setPreset(b.dataset.cam));
   $('secOn').onchange = e => { S.sectionOn = e.target.checked; }; $('secX').oninput = e => { S.sectionX = +e.target.value; $('secXV').textContent = e.target.value; };
-  $('hopA').oninput = e => { S.hopperAlpha = +e.target.value; }; $('shellA').oninput = e => { S.shellAlpha = +e.target.value; }; $('glassOn').onchange = e => { S.glass = e.target.checked; rebuildPills(); }; $('heat').onchange = e => { S.showHeat = e.target.checked; };
-  $('camBump').onchange = e => { sim.P.camBump = e.target.checked ? 1 : 0; };
+  $('hopA').oninput = e => { S.hopperAlpha = +e.target.value; }; $('shellA').oninput = e => { S.shellAlpha = +e.target.value; }; $('heat').onchange = e => { S.showHeat = e.target.checked; };
+  $('camBump').onchange = e => { S.camBump = e.target.checked ? 1 : 0; sim.P.camBump = S.camBump; };
   $('dtSel').onchange = e => { S.dtMode = +e.target.value; applyParams(); };
-  $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dispense_log.csv'; a.click(); };
+  $('btnExport').onclick = () => { const ex = sim.stats.exits.map(e => `${e.t.toFixed(4)},${e.id}`); const blob = new Blob(['t_s,pill_id\n' + ex.join('\n')], { type: 'text/csv' }); dlBlob(blob, 'dispense_log.csv'); };
+  function dlBlob(blob, name) { const a = document.createElement('a'), u = URL.createObjectURL(blob); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1500); }
   function setupObj() { return { S, adv, foam: sim.foam, texture: { cells: Array.from(TEX.cells), ridge: TEX.ridge, groove: TEX.groove, len: TEX.len }, camProfile: CAD.cam.custom ? CAD.cam.profile : null, hopper: hopRaw ? { name: hopRaw.name, v: b64enc(hopRaw.v), t: b64enc(hopRaw.t), offset: ['hopDx', 'hopDy', 'hopDz'].map(id => +$(id).value || 0) } : null, parts: XP.map(p => ({ name: p.name, unit: p.unit, pos: p.pos, rot: p.rot, sc: p.sc, mu: p.mu, rest: p.rest, solid: p.solid, count: p.count, col: p.col, alpha: p.alpha, v: b64enc(p.raw.v), t: b64enc(p.raw.t) })), model: MD.applied ? MD.rows.map(r => ({ name: r.name, role: r.role, v: b64enc(r.v), t: b64enc(r.t) })) : null }; }
-  $('btnSave').onclick = () => { S.bank = bankSave(); const o = setupObj(); const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'foamfeed_setup.json'; a.click(); idbPut(o); };
-  $('fileLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; const o = JSON.parse(await f.text()); applySetup(o); e.target.value = ''; };
-  function applySetup(o) { if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } Object.assign(S, o.S); Object.assign(adv, o.adv || {}); if (S.bank) bankLoad(S.bank);
+  $('btnSave').onclick = () => { S.bank = bankSave(); const o = setupObj(); const blob = new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }); dlBlob(blob, 'foamfeed_setup.json'); idbPut(o); };
+  $('fileLoad').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;   // cleared first: the same file can be picked again
+    let o; try { o = JSON.parse(await f.text()); } catch (err) { saveNote(`Could not read ${f.name}: not a valid setup file (${err.message}). Nothing was changed.`, true); return; }
+    try { checkSetup(o); } catch (err) { saveNote(`Did not load ${f.name}: ${err.message}. Nothing was changed.`, true); return; }
+    try { applySetup(o); saveNote(`Loaded ${f.name}.`); }
+    catch (err) { saveNote(`Loading ${f.name} failed part-way (${err.message}). The app may be half set up — press Start fresh or reload the page.`, true); } };
+  // refuse files that would leave the app half-loaded: must be a setup with a known foam
+  function checkSetup(o) { if (!o || typeof o !== 'object' || !o.S || typeof o.S !== 'object') throw new Error('this is not a FoamFeed setup file');
+    if (o.S.foamName != null && !FFx.FOAMS[o.S.foamName]) throw new Error(`unknown foam "${o.S.foamName}" (known: ${Object.keys(FFx.FOAMS).join(', ')})`); }
+  function applySetup(o) { if (o.foam && o.foam.cset == null) { delete o.foam.kc; delete o.foam.ks; delete o.foam.fperm; } if (o.adv) { delete o.adv.fperm; if (o.adv.cset == null) { delete o.adv.kc; delete o.adv.ks; } } checkSetup(o);
+    try { dustLedgerTick(); } catch (e) {}   // fold the old run's dust into the old unit before the bank is replaced
+    delete S.bank; Object.assign(S, o.S); delete S.glass; Object.assign(adv, o.adv || {});
+    if (S.bank) bankLoad(S.bank); else if (typeof bankReset === 'function') bankReset();   // a file without a bank must not keep our dispensers
     if (o.texture) { TEX.cells.set(o.texture.cells); TEX.ridge = o.texture.ridge; TEX.groove = o.texture.groove; TEX.len = o.texture.len; for (const [id, k] of [['texRidge', 'ridge'], ['texGroove', 'groove'], ['texLen', 'len']]) { $(id).value = TEX[k]; $(id + 'V').textContent = TEX[k]; } }
     if (o.camProfile) { CAD.cam = Object.assign({}, ORIG.cam, { profile: o.camProfile, custom: true }); camGen = genCam(o.camProfile); $('camInfo').textContent = 'Cam profile from setup file.'; }
-    else if (CAD.cam.custom) { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; $('camInfo').textContent = 'Original CAD cam.'; }
+    else if (CAD.cam.custom) { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); freeCamGen(); $('camInfo').textContent = 'Original CAD cam.'; }
     if (o.hopper && o.hopper.v) {
       hopRaw = { v: b64(o.hopper.v, Float32Array), t: b64(o.hopper.t, Uint32Array), name: o.hopper.name || 'container (from setup)' };
       ['hopDx', 'hopDy', 'hopDz'].forEach((id, k) => $(id).value = (o.hopper.offset || [0, 0, 0])[k]);
       applyHopper(true);
     } else if (hopRaw) { hopRaw = null; CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat(ORIG.parts.filter(p => p.role === 'hopper')); delete CAD.spawn; $('hopInfo').textContent = 'Original container.'; ['hopDx', 'hopDy', 'hopDz'].forEach(id => $(id).value = 0); }
-    if (o.model && o.model.length) { MD.rows = o.model.map(q => { const v = b64(q.v, Float32Array); return { name: q.name, role: q.role, v, t: b64(q.t, Uint32Array), bb: bbOf(v) }; }); mdTable(); mdApply(); Object.assign(S, o.S); }
+    if (o.model && o.model.length) { MD.rows = o.model.map(q => { const v = b64(q.v, Float32Array); return { name: q.name, role: q.role, v, t: b64(q.t, Uint32Array), bb: bbOf(v) }; }); mdTable(); mdApply(); Object.assign(S, o.S); delete S.glass; }
     else if (MD.applied) mdOriginal();
-    XP.length = 0; for (const q of o.parts || []) { const p = Object.assign({}, q, { raw: { v: b64(q.v, Float32Array), t: b64(q.t, Uint32Array) } }); delete p.v; delete p.t; XP.push(p); xpBuild(p); } xpCur = XP.length - 1; xpUI();
-    applyTex(); rebuildGLParts(); rebuildGlass();   // texture first: a raised-idler slot is cut to clear the ridges
-    newSim(); Object.assign(sim.foam, o.foam || {}); syncUI(); applyTex(); }
+    for (const p of XP) freeMesh(p.mesh); XP.length = 0; for (const q of o.parts || []) { const p = Object.assign({}, q, { raw: { v: b64(q.v, Float32Array), t: b64(q.t, Uint32Array) } }); delete p.v; delete p.t; XP.push(p); xpBuild(p); } xpCur = XP.length - 1; xpUI();
+    applyTex(); rebuildGLParts();   // texture first: a raised-idler slot is cut to clear the ridges
+    newSim(); applyFoam(); Object.assign(sim.foam, o.foam || {});
+    { const u = BANK.units[BANK.cur]; if (u && u.snap) { restorePills(sim, u.snap); u.snap = null; } }   // the running unit keeps its saved partial load (as activate does)
+    syncUI(); applyTex(); }
 
   /* ---- last saved setup, kept in this browser (IndexedDB: room for uploaded containers of several MB) */
   function idb() { return new Promise((res, rej) => { if (!window.indexedDB) return rej(new Error('no IndexedDB')); const r = indexedDB.open('foamfeed', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
@@ -2988,7 +3046,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     try { await idbOp('readwrite', st => st.put({ savedAt: Date.now(), o: JSON.parse(JSON.stringify(o)) }, 'lastSetup')); saveNote(`Saved · also kept in this browser — it reopens automatically next time.`); }
     catch (err) { saveNote(`Saved the file, but this browser would not keep a copy (${err.message}).`, true); }
   }
-  function saveNote(msg, warn) { $('saveNote').innerHTML = warn ? `<span class="warn">${msg}</span>` : msg; }
+  function saveNote(msg, warn) { $('saveNote').innerHTML = warn ? `<span class="warn">${escHTML(msg)}</span>` : escHTML(msg); }
   function toast(msg) { const t = $('ffToast'); t.textContent = msg; t.style.opacity = '1'; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.opacity = '0', 6000); }
   async function restoreLast() {
     const q = new URLSearchParams(location.search); if (location.hash.length > 1 && !q.has('fresh')) return;
@@ -3084,7 +3142,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       let c = meshCache.get(p);
       if (!c || c.key !== key) {
         const v0 = p.vArr || (p._v0 || (p._v0 = b64(p.v, Float32Array))), t0 = p.tArr || (p._t0 || (p._t0 = b64(p.t, Uint32Array)));
-        if (c && c.mesh) { for (const b of [c.mesh.pb, c.mesh.nb, c.mesh.cb, c.mesh.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(c.mesh.vao); }
+        if (c) freeMesh(c.mesh);
         let vv, tt = t0;
         if (p.role === 'plate' || p.role === 'hopper' || p.role === 'shell') { const sp = FFx.shellPart(p.role, v0, t0, CAD, simGeom(), S.hopFollow, S.thick, texHmm(), S.throat, p.id === '021_00'); vv = sp.v; tt = sp.t; }
         else vv = xformVerts(p, v0);
@@ -3093,6 +3151,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       const info = p._info || { idler: -1, kind: null };
       parts.push({ role: p.role, rot: p.rot, mesh: c.mesh, id: p.id, idler: info.idler, kind: info.kind });
     }
+    { const live = new Set(CAD.parts); for (const [p, c] of meshCache) if (!live.has(p)) { freeMesh(c.mesh); meshCache.delete(p); } }   // parts no longer in the model
     if (CAD.cam.custom && camGen) for (const g of camGen) parts.push(g);
     // dust collides with every solid: hardware that has no contact grid (bearings, pins, washers, motor, worm, servo,
     // wheels, gears) goes into a display-only grid; sliding gate parts / linkage are handled live
@@ -3100,7 +3159,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       if (camGen) for (const g of camGen) if (g.vv) { const v = g.vv, t = g.tt; for (let i = 0; i < t.length; i++) { const o = t[i] * 3; arr.push(v[o] * 1e-3, v[o + 1] * 1e-3, v[o + 2] * 1e-3); } }
       dustStaticTris = arr.length ? { tris: new Float64Array(arr), grid: null } : null; if (typeof sim !== 'undefined' && sim) sim.dustGrid = null; }
     ghostDirty = true;
-    if (throatGL) { for (const b of [throatGL.pb, throatGL.nb, throatGL.cb, throatGL.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(throatGL.vao); throatGL = null; }
+    freeMesh(throatGL); throatGL = null;
     if (S.throat && S.throat.on) {
       const hop = CAD.parts.find(p => p.role === 'hopper'), g = FFx.throatMesh(CAD, simGeom(), S.throat, !!hop && hop.id === '021_00', S.thick, texHmm());
       if (g && g.t.length) { throatGL = mkMesh(g.v, g.t, null, null, false); parts.push({ role: 'throat', rot: null, mesh: throatGL, id: 'throat' }); }
@@ -3110,14 +3169,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   // idle dispensers are drawn as one merged mesh of every opaque part (one draw call each) plus their own hopper / shell
   function ghostMesh() {
     if (!ghostDirty && ghostGL) return ghostGL; ghostDirty = false;
-    if (ghostGL) { for (const b of [ghostGL.pb, ghostGL.nb, ghostGL.cb, ghostGL.ib]) if (b) gl.deleteBuffer(b); gl.deleteVertexArray(ghostGL.vao); ghostGL = null; }
-    const L = []; let nv = 0, nt = 0;
-    for (const p of CAD.parts) { if (['hopper', 'shell', 'block', 'throat'].includes(p.role)) continue; const c = meshCache.get(p); if (!c || !c.vv) continue; L.push(c); nv += c.vv.length; nt += c.tt.length; }
-    if (!nt) return null; const v = new Float32Array(nv), t = new Uint32Array(nt); let ov = 0, ot = 0;
-    for (const c of L) { v.set(c.vv, ov); for (let i = 0; i < c.tt.length; i++) t[ot + i] = c.tt[i] + ov / 3; ov += c.vv.length; ot += c.tt.length; }
-    ghostGL = mkMesh(v, t, null, null, false); return ghostGL;
+    freeMesh(ghostGL); ghostGL = null;
+    const L = [];
+    for (const p of CAD.parts) { if (['hopper', 'shell', 'block', 'throat'].includes(p.role)) continue; const c = meshCache.get(p); if (!c || !c.vv || !c.tt.length) continue; L.push({ v: c.vv, t: c.tt }); }
+    if (!L.length) return null; const m = mergeMeshes(L);
+    ghostGL = mkMesh(m.v, m.t, null, null, false); return ghostGL;
   }
-  rebuildGLParts(); rebuildGlass();
+  function mcClear() { for (const c of meshCache.values()) freeMesh(c.mesh); meshCache.clear(); }
+  rebuildGLParts();
   function parseSTL(buf) {
     const dv = new DataView(buf), n = buf.byteLength >= 84 ? dv.getUint32(80, true) : 0;
     if (n > 0 && 84 + n * 50 === buf.byteLength) {
@@ -3169,7 +3228,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const nt = hopRaw.t.length / 3, size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
     const lo = toLocal(...mn), hi = toLocal(...mx);
     const over = !(mx[0] < 2 || mn[0] > 43 || mx[2] < 35);   // does it reach the belt area at all?
-    let msg = `<span class="ok">${hopRaw.name}</span>: ${nt.toLocaleString()} triangles, ${(mx[0] - mn[0]).toFixed(1)} × ${(mx[1] - mn[1]).toFixed(1)} × ${(mx[2] - mn[2]).toFixed(1)} mm.`;
+    let msg = `<span class="ok">${escHTML(hopRaw.name)}</span>: ${nt.toLocaleString()} triangles, ${(mx[0] - mn[0]).toFixed(1)} × ${(mx[1] - mn[1]).toFixed(1)} × ${(mx[2] - mn[2]).toFixed(1)} mm.`;
     if (!over) msg += ' <span class="warn">It does not overlap the belts — check it was exported in assembly coordinates (or use the offsets).</span>';
     if (size > 400) msg += ' <span class="warn">Very large — wrong units? (expects mm)</span>';
     if (nt > 60000) msg += ' <span class="warn">High triangle count slows contact checks; decimate to under ~60k.</span>';
@@ -3178,7 +3237,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (noRestart) return;
     rebuildGLParts(); rebuildPills();
   }
-  $('geoHop').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const m = await readMesh(f); hopRaw = { v: m.v, t: m.t, name: f.name }; applyHopper(); } catch (err) { $('hopInfo').innerHTML = `<span class="warn">Could not read ${f.name}: ${err.message}</span>`; } e.target.value = ''; };
+  $('geoHop').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const m = await readMesh(f); hopRaw = { v: m.v, t: m.t, name: f.name }; applyHopper(); } catch (err) { $('hopInfo').innerHTML = `<span class="warn">Could not read ${escHTML(f.name)}: ${escHTML(err.message)}</span>`; } e.target.value = ''; };
   ['hopDx', 'hopDy', 'hopDz'].forEach(id => $(id).onchange = applyHopper);
   $('hopReset').onclick = () => { hopRaw = null; CAD.parts = CAD.parts.filter(p => p.role !== 'hopper').concat(ORIG.parts.filter(p => p.role === 'hopper')); delete CAD.spawn; $('hopInfo').textContent = 'Original container.'; rebuildGLParts(); rebuildPills(); };
 
@@ -3258,8 +3317,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const pts = []; for (let i = 0; i < v.length; i += 3) pts.push([v[i + i1] - o1, v[i + i2] - o2]);
     return { pts, how: `stand-alone part, shaft on its ${'XYZ'[ax]} axis${inside ? ' through the origin' : ' (bounding-box centre)'}` };
   }
+  function freeCamGen() { if (camGen) for (const g of camGen) freeMesh(g.mesh); camGen = null; }
   function genCam(profile) {
-    const C = CAD.cam, np = profile.length, mk = (b) => {
+    freeCamGen(); const C = CAD.cam, np = profile.length, mk = (b) => {
       const pos = [], idx = [], ccx = b ? C.cxB : C.cx, ccu = b ? C.cuB : C.cu, sx = b ? -1 : 1;
       for (const vv of [0.1, 8.1]) { pos.push(...wpt(ccx, ccu, vv)); for (let i = 0; i < np; i++) { const ph = -PI + (i + 0.5) * TAU / np; pos.push(...wpt(ccx + sx * profile[i] * Math.cos(ph), ccu + profile[i] * Math.sin(ph), vv)); } }
       const r0 = 1, r1 = np + 2;
@@ -3274,7 +3334,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     camGen = genCam(profile); rebuildGLParts(); rebuildPills();
     const ng = sim.nipGap(), rmn = Math.min(...profile), rmx = Math.max(...profile);
     let lobes = 0; const mid = (rmn + rmx) / 2; if (rmx - rmn > 0.2) for (let i = 0; i < profile.length; i++) if (profile[i] >= mid && profile[(i - 1 + profile.length) % profile.length] < mid) lobes++;   // upward crossings of the mid radius
-    let msg = `<span class="ok">${label}</span>: radius ${rmn.toFixed(2)}–${rmx.toFixed(2)} mm, ${lobes ? lobes + ' lobe' + (lobes === 1 ? '' : 's') : 'round (no lobes)'}. Nip gap ${(ng.rest * 1e3).toFixed(2)} mm at rest, ${(ng.min * 1e3).toFixed(2)} mm at full lobe.`;
+    let msg = `<span class="ok">${escHTML(label)}</span>: radius ${rmn.toFixed(2)}–${rmx.toFixed(2)} mm, ${lobes ? lobes + ' lobe' + (lobes === 1 ? '' : 's') : 'round (no lobes)'}. Nip gap ${(ng.rest * 1e3).toFixed(2)} mm at rest, ${(ng.min * 1e3).toFixed(2)} mm at full lobe.`;
     if (ng.min <= 0) msg += ' <span class="warn">The lobes drive the two belts into each other — the cam is too big for this layout.</span>';
     else if (ng.min < 0.5e-3) msg += ' <span class="warn">Nip closes almost completely at the lobe.</span>';
     $('camInfo').innerHTML = msg;
@@ -3288,10 +3348,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       else { const r = camPtsFromMesh(await readMesh(f)); pts = r.pts; how = r.how; }
       if (pts.length < 3) throw new Error('no usable geometry found');
       applyCamProfile(profileFrom(pts, 180), `${f.name} (${how})`);
-    } catch (err) { $('camInfo').innerHTML = `<span class="warn">Could not use ${f.name}: ${err.message}</span>`; }
+    } catch (err) { $('camInfo').innerHTML = `<span class="warn">Could not use ${escHTML(f.name)}: ${escHTML(err.message)}</span>`; }
     e.target.value = '';
   };
-  $('camReset').onclick = () => { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; rebuildGLParts(); rebuildPills(); $('camInfo').textContent = 'Original CAD cam.'; $('camShape').value = ''; };
+  $('camReset').onclick = () => { CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); freeCamGen(); rebuildGLParts(); rebuildPills(); $('camInfo').textContent = 'Original CAD cam.'; $('camShape').value = ''; };
   // regular-polygon cam presets: corners filleted (rc), corner radius = CAD lobe peak, first corner at the CAD lobe angle
   function polygonCam(N, rc) {
     const prof0 = ORIG.cam.profile, np = prof0.length; let im = 0; for (let i = 1; i < np; i++) if (prof0[i] > prof0[im]) im = i;
@@ -3315,7 +3375,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   }
   function applySing() {
     if (!sim) return; const K = sim.setSingulator(S.sing && S.sing.on ? S.sing : null);
-    singGL = K ? capsuleMesh(K.a.map(x => x * 1e3), K.b.map(x => x * 1e3), K.r * 1e3) : null;
+    freeMesh(singGL); singGL = K ? capsuleMesh(K.a.map(x => x * 1e3), K.b.map(x => x * 1e3), K.r * 1e3) : null;
   }
   for (const [id, k] of [['sgU', 'u_mm'], ['sgX', 'x_mm'], ['sgV', 'v_mm'], ['sgLen', 'len_mm'], ['sgR', 'r_mm'], ['sgMu', 'mu']]) hook(id, v => { S.sing[k] = +v; applySing(); });
   $('sgOn').onchange = () => { S.sing.on = $('sgOn').checked; applySing(); };
@@ -3337,7 +3397,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       if (Array.isArray(c.sensors)) c.sensors.forEach((x, i) => { const h = hw.sensors && hw.sensors[i]; if (h) for (const k of HW_SENSOR_KEYS) { if (h[k] !== undefined) x[k] = h[k]; else delete x[k]; } });
       if (sim && sim.ctrl) sim.ctrl = null; S.ctrl = c; }
     if (sf.logic && window.FFLogic) FFLogic.load(JSON.parse(JSON.stringify(sf.logic))); }
-  const newUnit = k => { const p = JSON.parse(JSON.stringify(S.pill)); delete p.safety_push_mm; return { med: `Medication ${k + 1}`, pill: p, count: S.count, snap: null, out: 0, dustL: null, soft: (() => { try { return softGet(); } catch (e) { return null; } })() }; };   // a new dispenser starts on the auto safety-gate throw and a copy of the current software settings   // a new dispenser starts on the auto safety-gate throw
+  const newUnit = k => { const p = JSON.parse(JSON.stringify(S.pill)); delete p.safety_push_mm; return { med: `Medication ${k + 1}`, pill: p, count: S.count, snap: null, dustL: null, soft: (() => { try { return softGet(); } catch (e) { return null; } })() }; };   // a new dispenser starts on the auto safety-gate throw and a copy of the current software settings
   function pillsLeft(k) { if (k === BANK.cur && sim) { const B = sim.bodies; let n = 0; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) n++; return n; } const u = BANK.units[k]; return u.snap ? u.snap.p.length : u.count; }
   function snapPills(sm) {   // pills still in the dispenser (not yet out): positions + orientation + colour, at rest
     const B = sm.bodies, p = []; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) p.push([B.px[i], B.py[i], B.pz[i], B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3], B.hue[i]]); return { p }; }
@@ -3353,12 +3413,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (k === BANK.cur || k < 0 || k >= BANK.n) return;
     dustLedgerTick();
     const old = BANK.units[BANK.cur], o0 = bankOff(BANK.cur), o1 = bankOff(k);
-    old.snap = snapPills(sim); old.pill = JSON.parse(JSON.stringify(S.pill)); old.count = S.count; old.out += sim.stats.delivered || 0; old.soft = softGet();
-    const down = takeDownstream(sim, o0), wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) };
+    old.snap = snapPills(sim); old.pill = JSON.parse(JSON.stringify(S.pill)); old.count = S.count; old.soft = softGet();
+    old.wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()), wearT: sim.wearT };   // each dispenser keeps its own belts' wear
+    const down = takeDownstream(sim, o0);
     BANK.cur = k; const u = BANK.units[k]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; if (u.soft) softApply(u.soft); else u.soft = softGet();
     for (let a = 0; a < 3; a++) cam.t[a] += o1[a] - o0[a];   // camera follows the dispenser that is now running
     for (const p of XP) p.grid = null;
-    newSim(); applyFoam(); sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i]));
+    newSim(); applyFoam();
+    { const w = u.wear, C = sim.cells; if (w && w.p.length === C.perm.length && w.p.every((a, i) => a.length === C.perm[i].length) && w.v.every((a, i) => C.vis[i] && a.length === C.vis[i].length)) { C.perm.forEach((a, i) => a.set(w.p[i])); C.vis.forEach((a, i) => a.set(w.v[i])); sim.wearT = w.wearT || 0; } u.wear = null; }   // never run (or belts rebuilt since): fresh foam
     if (u.snap) restorePills(sim, u.snap); putDownstream(sim, down, o1); u.snap = null;
     syncUI(); bankUI();
   }
@@ -3367,20 +3429,30 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   /* Dust ledger per dispenser: the running sim's dust totals are folded into its bank unit as they grow (and before the
      sim is replaced), so every dispenser keeps its own shed / escaped mass, split by pill material. */
   function dustLedgerTick() { if (!sim || !BANK.units.length) return; const u = BANK.units[BANK.cur]; if (!u) return; const st = sim.stats, L = u.dustL || (u.dustL = { shed: 0, esc: 0, T: {} });
-    const seen = sim._dSeen || (sim._dSeen = { shed: 0, esc: 0, T: {} }); if (st.dust < seen.shed - 1e-18 || (st.dustEsc || 0) < seen.esc - 1e-18) { seen.shed = 0; seen.esc = 0; seen.T = {}; }
+    const dT = st.dustT || (st.dustT = {}); let seen = sim._dSeen; if (!seen || seen.ref !== dT) seen = sim._dSeen = { shed: 0, esc: 0, T: {}, ref: dT };
     L.shed += st.dust - seen.shed; L.esc += (st.dustEsc || 0) - seen.esc; seen.shed = st.dust; seen.esc = st.dustEsc || 0;
-    for (const [m, v] of Object.entries(st.dustT || {})) { const a = L.T[m] || (L.T[m] = { shed: 0, esc: 0 }), b = seen.T[m] || (seen.T[m] = { shed: 0, esc: 0 }); if (v.shed < b.shed || v.esc < b.esc) { b.shed = 0; b.esc = 0; } a.shed += v.shed - b.shed; a.esc += v.esc - b.esc; b.shed = v.shed; b.esc = v.esc; } }
+    for (const [m, v] of Object.entries(dT)) { const a = L.T[m] || (L.T[m] = { shed: 0, esc: 0 }), b = seen.T[m] || (seen.T[m] = { shed: 0, esc: 0 }); a.shed += v.shed - b.shed; a.esc += v.esc - b.esc; b.shed = v.shed; b.esc = v.esc; } }
+  // the running dispenser is mid-dose (controller / logic working, gate open): switching now would drop the dose
+  function bankBusy() { const C = sim && sim.ctrl;
+    return !!(C && ((C.mode === 'logic' && ((C.Lcall || 0) > 0 || (C.L && (C.L.motor || C.L.gate)))) || C.state !== 'idle' || C.queue > 0 || C.needs.length > 0 || C.awaitClear || C.awaitS3 != null || C.closeAt != null || (sim.gate && sim.gate.ang > (sim.gate.a0 || 0) + 1e-6))); }
   function bankStep() {
-    if (!BANK.q.length || !sim) return; const C = sim.ctrl;
-    const busy = C && ((C.mode === 'logic' && ((C.Lcall || 0) > 0 || (C.L && (C.L.motor || C.L.gate)))) || C.state !== 'idle' || C.queue > 0 || C.needs.length > 0 || C.awaitClear || C.awaitS3 != null || C.closeAt != null || (sim.gate && sim.gate.ang > (sim.gate.a0 || 0) + 1e-6));
-    if (busy) return; const c = BANK.q.shift(); activate(c.k); feedReq(c.n);
+    if (trial || !BANK.q.length || !sim || bankBusy()) return;   // never swap the sim in the middle of a Run trial
+    let c; do c = BANK.q.shift(); while (c && !(c.k >= 0 && c.k < BANK.n)); if (!c) return;   // calls for dispensers that no longer exist are dropped
+    activate(c.k); feedReq(c.n);
   }
   function setBankN(n) { n = Math.max(1, Math.min(32, Math.round(n) || 1));
+    if (BANK.cur >= n && bankBusy() && !confirm(`Dispenser #${BANK.cur + 1} is in the middle of a dose. Remove it anyway? The dose is dropped.`)) { $('bkN').value = BANK.n; return; }
     while (BANK.units.length < n) BANK.units.push(newUnit(BANK.units.length));
-    if (BANK.cur >= n) activate(0); BANK.n = n; BANK.q = BANK.q.filter(c => c.k < n); S.bank = bankSave(); bankUI(); fitAll(); }
-  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, 32).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, out: u.out, dustL: u.dustL || null, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap, soft: k === BANK.cur ? softGet() : (u.soft || null) })) }; }   // every dispenser ever set up (all 32), so shrinking the bank and growing it back loses nothing
-  function bankLoad(b) { if (!b) return; BANK.cols = b.cols || 8; BANK.pitchX = b.pitchX || 50; BANK.pitchY = b.pitchY || 110; BANK.units = (b.units || []).map((u, k) => Object.assign(newUnit(k), u)); BANK.n = Math.max(1, Math.min(32, b.n || BANK.units.length || 1)); while (BANK.units.length < BANK.n) BANK.units.push(newUnit(BANK.units.length));
+    if (BANK.cur >= n) activate(0); BANK.n = n;
+    if (n === 1) { const q = BANK.q; BANK.q = []; for (const c of q) if (c.k === 0) feedReq(c.n); }   // one dispenser: bankStep no longer runs, so its calls go straight to it
+    else BANK.q = BANK.q.filter(c => c.k < n);
+    S.bank = bankSave(); bankUI(); fitAll(); }
+  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, 32).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, dustL: u.dustL || null, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap, soft: k === BANK.cur ? softGet() : (u.soft || null) })) }; }   // every dispenser ever set up (all 32), so shrinking the bank and growing it back loses nothing
+  let settleJob = null;   // background settling of an idle dispenser's first load (settleStep)
+  function bankLoad(b) { if (!b) return; BANK.q = []; settleJob = null; BANK.cols = b.cols || 8; BANK.pitchX = b.pitchX || 50; BANK.pitchY = b.pitchY || 110; BANK.units = (b.units || []).map((u, k) => Object.assign(newUnit(k), u)); BANK.n = Math.max(1, Math.min(32, b.n || BANK.units.length || 1)); while (BANK.units.length < BANK.n) BANK.units.push(newUnit(BANK.units.length));
     BANK.cur = Math.min(b.cur || 0, BANK.n - 1); const u = BANK.units[BANK.cur]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; if (u.soft) { softApply(u.soft); if (window.FFLogic) setTimeout(() => FFLogic.load(JSON.parse(JSON.stringify(u.soft.logic || FFLogic.save()))), 0); } }
+  // a loaded setup with no bank: one fresh dispenser built from the current S.pill / S.count / software settings
+  function bankReset() { BANK.units = [newUnit(0)]; BANK.n = 1; BANK.cur = 0; BANK.q = []; settleJob = null; bankSel = 0; }
   const pillLabel = p => { const sh = { tablet: 'tablet', capsule: 'capsule', ellipsoid: 'softgel', sphere: 'bead' }[p.shape] || p.shape; return p.shape === 'tablet' || p.shape === 'sphere' ? `${sh} ${p.W} mm` : `${sh} ${p.L}×${p.W} mm`; };
   let bankSel = 0;
   function bankLabels() { const ds = $('dkUnit'); for (const o of ds.options) { const k = +o.value; o.textContent = `#${k + 1} · ${BANK.units[k].med} · ${pillLabel(k === BANK.cur ? S.pill : BANK.units[k].pill)} · ${pillsLeft(k)} left${k === BANK.cur ? ' ◀ running' : ''}`; }
@@ -3388,7 +3460,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function bankUI() {
     if (!BANK.units.length) BANK.units.push(newUnit(0)); BANK.units[BANK.cur].pill = S.pill; BANK.units[BANK.cur].count = S.count;
     $('bkN').value = BANK.n; $('bkCols').value = BANK.cols; $('bkPx').value = BANK.pitchX; $('bkPy').value = BANK.pitchY;
-    const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const esc = escHTML;
     const lab = k => `#${k + 1} · ${BANK.units[k].med} · ${pillLabel(k === BANK.cur ? S.pill : BANK.units[k].pill)} · ${pillsLeft(k)} left`;
     const opts = [...Array(BANK.n).keys()].map(k => `<option value="${k}">${esc(lab(k))}${k === BANK.cur ? ' ◀ running' : ''}</option>`).join('');
     const ds = $('dkUnit'); const sv = ds.value; ds.innerHTML = opts; ds.value = sv !== '' && +sv < BANK.n ? sv : String(BANK.cur); $('dkUnitW').style.display = BANK.n > 1 ? '' : 'none';
@@ -3398,29 +3470,30 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     for (const tr of $('bkTbl').querySelectorAll('tr[data-k]')) { const k = +tr.dataset.k; tr.onclick = e => { if (e.target.classList.contains('bkGo')) return; bankSel = k; bankEd(); bankUI(); }; tr.querySelector('.bkGo').onclick = () => { bankCall(k, ctS().n); $('dkUnit').value = String(k); }; }
     bankEd();
   }
-  $('bkSoftEdit').onclick = () => { if (bankSel !== BANK.cur) activate(bankSel); else bankUI(); };
+  $('bkSoftEdit').onclick = () => { if (bankSel === BANK.cur) { bankUI(); return; } if (bankBusy() && !confirm(`Dispenser #${BANK.cur + 1} is in the middle of a dose. Switch anyway? The dose is dropped.`)) return; activate(bankSel); };
   $('bkSoftCopy').onclick = () => { if (BANK.n < 2) return; if (!confirm(`Copy dispenser #${BANK.cur + 1}'s feed rate, vibrator, dispense control and logic to all ${BANK.n} dispensers? Their own settings are replaced.`)) return;
     const sf = softGet(); for (let k = 0; k < BANK.n; k++) if (k !== BANK.cur) BANK.units[k].soft = JSON.parse(JSON.stringify(sf)); S.bank = bankSave(); bankUI(); };
   function bankEd() { if (bankSel >= BANK.n) bankSel = 0; const u = BANK.units[bankSel];
     { const multi = BANK.n > 1, lab = `#${BANK.cur + 1} · ${BANK.units[BANK.cur].med}`;
-      for (const e of document.querySelectorAll('.bkScope')) { e.style.display = multi ? '' : 'none'; e.innerHTML = `Settings for dispenser <b>${lab.replace(/</g, '&lt;')}</b> only (each dispenser keeps its own).`; }
+      for (const e of document.querySelectorAll('.bkScope')) { e.style.display = multi ? '' : 'none'; e.innerHTML = `Settings for dispenser <b>${escHTML(lab)}</b> only (each dispenser keeps its own).`; }
       $('bkSoftNote').innerHTML = bankSel === BANK.cur ? `Belt speed, vibrator, dispense control and logic now shown are <b>#${BANK.cur + 1}</b>'s.` : `#${bankSel + 1} has its own feed rate, vibrator, dispense control and logic. Press <b>Set up this dispenser</b> to edit them.`;
       $('bkSoftEdit').disabled = bankSel === BANK.cur; $('bkSoftCopy').style.display = multi ? '' : 'none'; } $('bkSelN').textContent = `#${bankSel + 1}`; $('bkMed').value = u.med; $('bkCount').value = bankSel === BANK.cur ? S.count : u.count; $('bkPill').value = ''; }
   $('bkN').onchange = () => setBankN(+$('bkN').value);
-  for (const [id, k] of [['bkCols', 'cols'], ['bkPx', 'pitchX'], ['bkPy', 'pitchY']]) $(id).onchange = () => { BANK[k] = Math.max(id === 'bkCols' ? 1 : 10, +$(id).value || BANK[k]); fitAll(); };
+  for (const [id, k] of [['bkCols', 'cols'], ['bkPx', 'pitchX'], ['bkPy', 'pitchY']]) $(id).onchange = () => { BANK[k] = Math.max(id === 'bkCols' ? 1 : 10, +$(id).value || BANK[k]); for (const p of XP) p.grid = null; xpApply(); fitAll(); };   // the running dispenser moved: its part collision is re-offset
   $('bkMed').onchange = () => { BANK.units[bankSel].med = $('bkMed').value || `Medication ${bankSel + 1}`; bankUI(); };
-  $('bkPill').innerHTML = '<option value="">change pill…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
-  $('bkPill').onchange = () => { const p = PILLS[$('bkPill').value]; if (!p) return; const sp = Object.assign({ L: p.W, T: p.W, edge: 0.8, mat: 'pressed' }, p); if (p.shape === 'tablet') sp.L = p.W;
-    if (bankSel === BANK.cur) { delete S.pill.fri; delete S.pill.tack; Object.assign(S.pill, sp); syncUI(); later(rebuildPills, 50); } else { BANK.units[bankSel].pill = sp; BANK.units[bankSel].snap = null; } bankUI(); };
+  // a preset onto a dispenser's pill (same rule as the Pill presets menu): its own extra fields stay, friability / tack /
+  // custom name do not carry over to the new pill
+  function mergePill(base, p) { const q = JSON.parse(JSON.stringify(base || {})); delete q.fri; delete q.tack; delete q.name; Object.assign(q, { L: p.W, T: p.W, edge: 0.8, mat: 'pressed' }, JSON.parse(JSON.stringify(p))); if (p.shape === 'tablet') q.L = p.W; return q; }
+  $('bkPill').onchange = () => { const p = PILLS[$('bkPill').value]; if (!p) return;
+    if (bankSel === BANK.cur) { const q = mergePill(S.pill, p); for (const k of Object.keys(S.pill)) delete S.pill[k]; Object.assign(S.pill, q); syncUI(); later(rebuildPills, 50); } else { const u = BANK.units[bankSel]; u.pill = mergePill(u.pill, p); u.snap = null; } bankUI(); };
   $('bkCount').onchange = () => { const n = Math.max(1, Math.min(400, +$('bkCount').value || 10)); if (bankSel === BANK.cur) { S.count = n; syncUI(); } else { BANK.units[bankSel].count = n; BANK.units[bankSel].snap = null; } bankUI(); };
   $('bkRefill').onclick = () => { if (bankSel === BANK.cur) $('btnTrial').click(); else BANK.units[bankSel].snap = null; bankUI(); };
   // idle dispensers that were never run start full: settle their load once in a throw-away sim (a little each frame)
-  let settleJob = null;
   function settleStep() {
     if (!settleJob) { const k = BANK.units.findIndex((u, i) => i < BANK.n && i !== BANK.cur && !u.snap); if (k < 0) return;
-      const u = BANK.units[k], sm = FFx.createSim(CAD, { pill: u.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, noFoam: false, params: { restSleep: true, rpm: 0, thickness: S.thick * 1e-3, dt: S.dtMode } }); sm.P.rpm = 0; sm.addPills(u.count); settleJob = { k, sm }; }
+      const u = BANK.units[k], sm = FFx.createSim(CAD, { pill: u.pill, foam: S.foamName, shore: S.shore, glass: false, geom: simGeom(), hopperFollow: S.hopFollow, throat: S.throat, noFoam: false, params: { restSleep: true, rpm: 0, thickness: S.thick * 1e-3, dt: S.dtMode } }); sm.P.rpm = 0; sm.addPills(u.count); settleJob = { k, sm, pill: u.pill, count: u.count }; }
     const J = settleJob, t0 = performance.now(); while (performance.now() - t0 < 4 && J.sm.t < 1.2) J.sm.step(20);
-    if (J.sm.t >= 1.2) { const u = BANK.units[J.k]; if (u && !u.snap && J.k !== BANK.cur) u.snap = snapPills(J.sm); settleJob = null; bankUI(); }
+    if (J.sm.t >= 1.2) { const u = BANK.units[J.k]; if (u && !u.snap && J.k !== BANK.cur && J.k < BANK.n && u.pill === J.pill && u.count === J.count) u.snap = snapPills(J.sm); /* pill or load changed meanwhile: dropped, the next pass settles the new one */ settleJob = null; bankUI(); }
   }
   /* ---- imported parts: file -> transform (units, move, rotate about centre, scale) -> GL mesh + collision tris */
   const XP = []; let xpCur = -1, xpT = null;
@@ -3439,20 +3512,22 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       const e1 = [W[Bv] - W[A], W[Bv + 1] - W[A + 1], W[Bv + 2] - W[A + 2]], e2 = [W[Cv] - W[A], W[Cv + 1] - W[A + 1], W[Cv + 2] - W[A + 2]];
       let nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2], nz = e1[0] * e2[1] - e1[1] * e2[0]; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
       for (let k = 0; k < 3; k++) { const s0 = [A, Bv, Cv][k], o = f * 9 + k * 3; for (let a = 0; a < 3; a++) { pos[o + a] = W[s0 + a]; tris[o + a] = W[s0 + a] * 1e-3; } nrm[o] = nx; nrm[o + 1] = ny; nrm[o + 2] = nz; idx[f * 3 + k] = f * 3 + k; } }
-    p.mesh = mkMesh(pos, idx, nrm, null, false); p.tris = tris; p.grid = null;
+    freeMesh(p.mesh); p.mesh = mkMesh(pos, idx, nrm, null, false); p.tris = tris; p.grid = null;
   }
   function xpApply(rebuild) {
     if (rebuild) for (const p of XP) if (!p.mesh) xpBuild(p);
     if (!sim) return; clearTimeout(xpT);
-    // the collision grid is rebuilt a moment after the last change so dragging a slider stays smooth
-    xpT = setTimeout(() => { if (!sim) return; const bo = bankOff(BANK.cur), sh = t => { if (!bo[0] && !bo[1] && !bo[2]) return t; const o = new Float64Array(t.length); for (let i = 0; i < t.length; i += 3) { o[i] = t[i] - bo[0] * 1e-3; o[i + 1] = t[i + 1] - bo[1] * 1e-3; o[i + 2] = t[i + 2] - bo[2] * 1e-3; } return o; };
+    // the collision grid is rebuilt a moment after the last change so dragging a slider stays smooth -- except when the sim
+    // has no part collision at all yet (new sim after a switch): then at once, or pills fall through for those 60 ms
+    const go = () => { if (!sim) return; const bo = bankOff(BANK.cur), sh = t => { if (!bo[0] && !bo[1] && !bo[2]) return t; const o = new Float64Array(t.length); for (let i = 0; i < t.length; i += 3) { o[i] = t[i] - bo[0] * 1e-3; o[i + 1] = t[i + 1] - bo[1] * 1e-3; o[i + 2] = t[i + 2] - bo[2] * 1e-3; } return o; };
       sim.setExtraParts(XP.map(p => ({ name: p.name, tris: sh(p.tris), grid: p.grid, mu: p.mu, rest: p.rest, solid: p.solid, count: p.count })));
-      if (sim.xp) sim.xp.forEach((q, k) => { XP[k].grid = q.grid; }); }, 60);
+      if (sim.xp) sim.xp.forEach((q, k) => { if (XP[k]) XP[k].grid = q.grid; }); };
+    if (XP.length && !(sim.xp && sim.xp.length)) go(); else xpT = setTimeout(go, 60);
   }
   function xpPhys() { if (sim && sim.xp) sim.xp.forEach((q, k) => { const p = XP[k]; if (!p) return; q.mu = p.mu; q.rest = p.rest; q.solid = p.solid; q.count = p.count; }); }
   const XPN = [['xpX', 0], ['xpY', 1], ['xpZ', 2]], XPR = [['xpRx', 0], ['xpRy', 1], ['xpRz', 2]];
   function xpUI() {
-    const sel = $('xpSel'); sel.innerHTML = XP.length ? XP.map((p, k) => `<option value="${k}">${p.name.replace(/</g, '&lt;')}</option>`).join('') : '<option value="">— no parts yet —</option>'; sel.dataset.n = XP.length;
+    const sel = $('xpSel'); sel.innerHTML = XP.length ? XP.map((p, k) => `<option value="${k}">${escHTML(p.name)}</option>`).join('') : '<option value="">— no parts yet —</option>'; sel.dataset.n = XP.length;
     if (xpCur >= XP.length) xpCur = XP.length - 1; sel.value = xpCur >= 0 ? String(xpCur) : ''; $('xpEd').style.display = xpCur >= 0 ? '' : 'none'; if (xpCur < 0) return;
     const p = XP[xpCur]; $('xpName').value = p.name; $('xpUnit').value = String(p.unit);
     for (const [id, a] of XPN) { $(id).value = p.pos[a]; $(id + 'n').value = p.pos[a]; } for (const [id, a] of XPR) { $(id).value = p.rot[a]; $(id + 'n').value = p.rot[a]; }
@@ -3474,10 +3549,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('xpCount').onchange = () => xpEdit(p => { p.count = $('xpCount').checked; }, true);
   $('xpCol').oninput = () => { const p = XP[xpCur]; if (p) p.col = $('xpCol').value; }; $('xpA').oninput = () => { const p = XP[xpCur]; if (p) p.alpha = +$('xpA').value; };
   $('xpSel').onchange = () => { xpCur = $('xpSel').value === '' ? -1 : +$('xpSel').value; xpUI(); };
-  $('xpPlace').onclick = () => { xpEdit(p => { p.pos = [0, 0, 0]; xpBuild(p); const [a, b] = p.bb, ox = sim.O[0] * 1e3 + sim.XB * 500, oy = 20, oz = -3;
+  $('xpPlace').onclick = () => { xpEdit(p => { p.pos = [0, 0, 0]; xpBuild(p); const [a, b] = p.bb, bo = bankOff(BANK.cur), ox = sim.O[0] * 1e3 + sim.XB * 500 + bo[0], oy = 20 + bo[1], oz = -3 + bo[2];
     p.pos = [ox - (a[0] + b[0]) / 2, oy - (a[1] + b[1]) / 2, oz - b[2]].map(x => Math.round(x * 2) / 2); xpUI(); }); fitAll(); };
   $('xpZero').onclick = () => xpEdit(p => { p.pos = [0, 0, 0]; p.rot = [0, 0, 0]; p.sc = 1; xpUI(); });
-  $('xpDel').onclick = () => { if (xpCur < 0) return; XP.splice(xpCur, 1); xpCur = Math.min(xpCur, XP.length - 1); xpUI(); xpApply(); };
+  $('xpDel').onclick = () => { if (xpCur < 0) return; freeMesh(XP[xpCur].mesh); XP.splice(xpCur, 1); xpCur = Math.min(xpCur, XP.length - 1); xpUI(); xpApply(); };
   $('xpDup').onclick = () => { const p = XP[xpCur]; if (!p) return; const q = Object.assign({}, p, { name: p.name + ' copy', pos: p.pos.slice(), rot: p.rot.slice(), mesh: null, grid: null, tris: null }); q.pos[0] += 10; XP.push(q); xpCur = XP.length - 1; xpBuild(q); xpUI(); xpApply(); };
   $('xpFile').onchange = async e => { for (const f of e.target.files) { try { const m = await readMesh(f);
         const p = { name: f.name.replace(/\.[^.]+$/, ''), raw: m, unit: 1, pos: [0, 0, 0], rot: [0, 0, 0], sc: 1, mu: 0.35, rest: 0.45, solid: true, count: false, col: '#9ad0ff', alpha: 0.6 };
@@ -3539,7 +3614,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   const baseName = n => n.replace(/\s*\(\d+\)/g, '').trim();
   function mdTable() {
     const groups = new Map(); MD.rows.forEach((r, k) => { const b = baseName(r.name); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(k); });
-    const esc = x => x.replace(/&/g, '&amp;').replace(/</g, '&lt;'), opts = ROLES.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
+    const esc = escHTML, opts = ROLES.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
     let h = '<tr style="position:sticky;top:0;background:#1b212b"><th style="text-align:left;padding:3px">Part</th><th>×</th><th>Size mm</th><th>Role</th><th></th></tr>';
     for (const [b, ks] of groups) { const r = ks.map(k => MD.rows[k]).reduce((a, b) => (b.v.length > a.v.length ? b : a)), bb = r.bb, sz = [0, 1, 2].map(a => (bb[1][a] - bb[0][a]).toFixed(0)).join('×');
       h += `<tr data-g="${ks.join(',')}" style="border-top:1px solid #2a303b"><td style="padding:3px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(b)}">${esc(b)}</td><td style="text-align:center">${ks.length}</td><td style="text-align:center;white-space:nowrap">${sz}</td><td><select class="mdRole" style="max-width:118px">${opts}</select></td><td><button class="mdRep" title="swap in a new version of this part (STEP / STL / OBJ, same coordinates as the assembly)">Replace…</button></td></tr>`; }
@@ -3564,9 +3639,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function findConveyor(rows) {
     const belts = rows.filter(r => r.role === 'belt'); if (belts.length !== 2) return { err: `needs exactly 2 parts tagged Belt (found ${belts.length})` };
     const P = belts.map(r => pca(r.v)); let eu = P[0].ax[0].d; if (eu[2] < 0) eu = eu.map(x => -x);   // run direction: up the incline
-    let ev0 = P[0].ax[2].d; let ex = unit(P[1].c.map((x, a) => x - P[0].c[a])); let A = 0, B = 1;
+    let ex = unit(P[1].c.map((x, a) => x - P[0].c[a])); let A = 0, B = 1;
     if (ex[0] < -1e-9 || (Math.abs(ex[0]) < 1e-9 && ex[1] < 0)) { ex = ex.map(x => -x); A = 1; B = 0; }
-    ex = unit(ex.map((x, a) => x - dot(ex, eu) * eu[a])); const ev = unit(cross(ex, eu)); void ev0;
+    ex = unit(ex.map((x, a) => x - dot(ex, eu) * eu[a])); const ev = unit(cross(ex, eu));
     const ext = r => { const v = r.v, mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9]; for (let i = 0; i < v.length; i += 3) { const p = [v[i], v[i + 1], v[i + 2]]; for (const [k, e] of [[0, ex], [1, eu], [2, ev]]) { const d = dot(p, e); if (d < mn[k]) mn[k] = d; if (d > mx[k]) mx[k] = d; } } return [mn, mx]; };
     const ea = ext(belts[A]), eb = ext(belts[B]), Ra = (ea[1][0] - ea[0][0]) / 2, Rbb = (eb[1][0] - eb[0][0]) / 2, R = (Ra + Rbb) / 2;
     const xA = (ea[0][0] + ea[1][0]) / 2, xB = (eb[0][0] + eb[1][0]) / 2, u0 = ea[0][1] + Ra, Lc = (ea[1][1] - ea[0][1]) - 2 * Ra, v0 = Math.min(ea[0][2], eb[0][2]), W = Math.max(ea[1][2], eb[1][2]) - v0;
@@ -3578,7 +3653,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
      (a model drawn with the belts a fraction of a mm into the plate, or the plate a little off the belt run, is squared up). */
   function seatOnPlate(rows, fr) {
     const pl = rows.filter(r => r.role === 'plate'); if (!pl.length || fr.err) return null;
-    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], R = fr.R || 9, A = [];
+    const R = fr.R || 9, A = [];
     for (const r of pl) { const v = r.v, t = r.t;
       for (let i = 0; i < t.length; i += 3) { const P = [0, 1, 2].map(k => { const j = t[i + k] * 3, d = [v[j] - fr.O[0], v[j + 1] - fr.O[1], v[j + 2] - fr.O[2]]; return [dot(d, fr.ex), dot(d, fr.eu), dot(d, fr.ev)]; });
         const e1 = [P[1][0] - P[0][0], P[1][1] - P[0][1], P[1][2] - P[0][2]], e2 = [P[2][0] - P[0][0], P[2][1] - P[0][1], P[2][2] - P[0][2]];
@@ -3591,7 +3666,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], y = [0, 0, 0]; for (const [x, u, v, w] of A) { const f = [x, u, 1]; for (let i = 0; i < 3; i++) { y[i] += w * f[i] * v; for (let j = 0; j < 3; j++) M[i][j] += w * f[i] * f[j]; } }
     const det = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]), D = det(M); if (Math.abs(D) < 1e-12) return null;
     const sol = [0, 1, 2].map(k => det(M.map((row, i) => row.map((x, j) => j === k ? y[i] : x))) / D), [a, b, c] = sol;
-    const nrm = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; }, lin = (p, q, r) => [0, 1, 2].map(k => p[0] * fr.ex[k] + p[1] * fr.eu[k] + p[2] * fr.ev[k]);
+    const nrm = unit, lin = (p, q, r) => [0, 1, 2].map(k => p[0] * fr.ex[k] + p[1] * fr.eu[k] + p[2] * fr.ev[k]);
     const ev = nrm(lin([-a, -b, 1])); let eu = lin([0, 1, b]); const d = dot(eu, ev); eu = nrm([eu[0] - d * ev[0], eu[1] - d * ev[1], eu[2] - d * ev[2]]);
     let ex = [eu[1] * ev[2] - eu[2] * ev[1], eu[2] * ev[0] - eu[0] * ev[2], eu[0] * ev[1] - eu[1] * ev[0]]; if (dot(ex, fr.ex) < 0) ex = ex.map(x => -x);
     const O = [0, 1, 2].map(k => fr.O[k] + c * fr.ev[k]);
@@ -3625,7 +3700,6 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     const p1 = shared(cR, cg), p2 = shared(cR, cH); if (!p1 || !p2) return null;
     const Cc = cH.filter(c => Math.hypot(c[0] - p2[0], c[1] - p2[1]) > 2).sort((a, b) => b[2] - a[2] || b[3] - a[3])[0]; if (!Cc) return null; const C = [Cc[0], Cc[1]];
     // slot ends along y at the gate's mid line
-    // the gate's end faces (vertices at its min / max y, nudged 0.05 mm inside) are cast along the slot; the nearest wall wins
     const bb = g.bb, xm = (bb[0][0] + bb[1][0]) / 2, zm = (bb[0][2] + bb[1][2]) / 2, walls = rows.filter(r => r.role === 'shell' || r.role === 'plate');
     // sample points on a grid across the end face, keep those inside the gate material (odd crossings of the gate's own
     // surface along the slot), cast each toward the wall: a groove or notch in the gate is not mistaken for material
@@ -3661,7 +3735,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function mdApply() {
     const fr = findConveyor(MD.rows);
     if (!fr.err) { const st = seatOnPlate(MD.rows, fr); if (st) { fr.O = st.O; fr.ex = st.ex; fr.eu = st.eu; fr.ev = st.ev; fr.seat = st; } }
-    if (fr.err) { $('mdInfo').innerHTML = `<span class="warn">Can't use this model yet — ${fr.err}.</span> Tag the two belt loops as “Belt”.`; return; }
+    if (fr.err) { $('mdInfo').innerHTML = `<span class="warn">Can't use this model yet — ${escHTML(fr.err)}.</span> Tag the two belt loops as “Belt”.`; return; }
     const wh = findWheels(MD.rows, fr), ML = modelLinkage(MD.rows), keep = MD.rows.filter(r => r.role !== 'ignore' && r.role !== 'belt' && (r.role !== 'link' || ML));
     const has = role => keep.some(r => r.role === role);
     // the sim drives the gate from its closed pose (front edge at y 2.5, as in the reference CAD); a model saved with the gate
@@ -3679,8 +3753,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (wh) { const a = wh[0], b = wh[wh.length - 1]; CAD.cam = Object.assign({}, ORIG.cam, { cx: a.cx, cu: a.cu, cxB: wh.length > 1 ? b.cx : fr.xb - a.cx, cuB: wh.length > 1 ? b.cu : a.cu, profile: new Array(72).fill(+a.r.toFixed(3)), custom: true }); camGen = genCam(CAD.cam.profile); }
     const hop = keep.filter(r => r.role === 'hopper'); if (hop.length) { const m = mergeMeshes(hop); CAD.spawn = spawnFrom(m.v, m.t); } else delete CAD.spawn;
     hopRaw = null; const Wm = Math.min(20, Math.max(4, +fr.W.toFixed(2))); FFx.setGeom0({ uTop: +fr.Lc.toFixed(3), W: Wm }); S.geom = { bot: 0, top: 0, W: Wm };   // the model is its own reference layout: no warp
-    meshCache.clear(); refreshFrame(); MD.applied = true; MD.foam = fr.foam; MD.foamOK = null;
-    rebuildGLParts(); rebuildGlass(); newSim(); syncUI(); applyGeom && applyGeom(); fitAll();
+    mcClear(); refreshFrame(); MD.applied = true; MD.foam = fr.foam; MD.foamOK = null;
+    rebuildGLParts(); newSim(); syncUI(); applyGeom && applyGeom(); fitAll();
     thickFlag(); if (Math.abs(fr.foam - S.thick) >= 0.2) { const sec = [...document.querySelectorAll('section.sec')].find(x => x.dataset.t === 'Foam belts'); if (sec) sec.classList.add('open'); }
     $('mdInfo').innerHTML = `<span class="ok">Using your model (${keep.length} parts).</span> ` + mdReport(fr, wh) + (Math.abs(fr.foam - S.thick) >= 0.2 ? ' <span class="warn">Foam thickness differs from your model — see the choice under Foam.</span>' : '') + (has('gate') ? ` Gate: your gate part${gShift ? ` (drawn open in the model — moved ${(-gShift).toFixed(1)} mm back to closed)` : ''}` + (ML ? `, driven by your own motion arms (servo axis y ${ML.link.C[0].toFixed(1)} z ${ML.link.C[1].toFixed(1)}, horn ${Math.hypot(ML.link.p2[0] - ML.link.C[0], ML.link.p2[1] - ML.link.C[1]).toFixed(1)} mm, rod ${Math.hypot(ML.link.p1[0] - ML.link.p2[0], ML.link.p1[1] - ML.link.p2[1]).toFixed(1)} mm); closes against the wall at y ${ML.front.toFixed(1)}, full stroke ${ML.link.wall_mm.toFixed(1)} mm to the back wall.` : ', moved by the built-in servo linkage.') : ' Gate: built-in.') + (has('safety') ? ' Pill width safety gate: your part, slides in along y (see Feed control).' : '');
   }
@@ -3689,23 +3763,23 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   // outward, nip closes), exactly as if that foam were fitted to this hardware.
   function thickFlag() {
     const el = $('thickFlag'); if (!MD.applied || MD.foam == null || Math.abs(MD.foam - S.thick) < 0.2) { el.style.display = 'none'; return; }
-    const ng = sim ? sim.nipGap() : null, nip = ng ? ` With ${S.thick} mm the gap at the drive wheels is ${Math.max(0, ng.min * 1e3).toFixed(2)} mm${ng.min < 0 ? ` (foam pressed ${(-ng.min * 1e3).toFixed(2)} mm into foam)` : ''}, ${(ng.rest * 1e3).toFixed(2)} mm elsewhere.` : '';
-    el.innerHTML = `⚠ Your model's belts are <b>${MD.foam.toFixed(2)} mm</b> thick; the setting is <b>${S.thick} mm</b> (${S.thick > MD.foam ? 'thicker' : 'thinner'} than the real part).${nip}<div class="btns" style="margin-top:4px"><button id="tfModel">Use model size (${MD.foam.toFixed(1)} mm)</button><button id="tfKeep">Keep ${S.thick} mm</button></div>`;
+    const ng = sim ? sim.nipGap() : null, nip = ng ? ` With ${escHTML(S.thick)} mm the gap at the drive wheels is ${Math.max(0, ng.min * 1e3).toFixed(2)} mm${ng.min < 0 ? ` (foam pressed ${(-ng.min * 1e3).toFixed(2)} mm into foam)` : ''}, ${(ng.rest * 1e3).toFixed(2)} mm elsewhere.` : '';
+    el.innerHTML = `⚠ Your model's belts are <b>${MD.foam.toFixed(2)} mm</b> thick; the setting is <b>${escHTML(S.thick)} mm</b> (${S.thick > MD.foam ? 'thicker' : 'thinner'} than the real part).${nip}<div class="btns" style="margin-top:4px"><button id="tfModel">Use model size (${MD.foam.toFixed(1)} mm)</button><button id="tfKeep">Keep ${escHTML(S.thick)} mm</button></div>`;
     el.style.display = '';
     $('tfModel').onclick = () => { S.thick = +MD.foam.toFixed(1); $('thick').value = S.thick; $('thickV').textContent = S.thick; applyParams(); geoInfo(); thickFlag(); };
     $('tfKeep').onclick = () => { MD.foamOK = S.thick; el.style.display = 'none'; };
     if (MD.foamOK === S.thick) el.style.display = 'none';
   }
-  function mdOriginal() { CAD.parts = ORIG.parts.slice(); if (ORIG.gateLink) CAD.gateLink = JSON.parse(JSON.stringify(ORIG.gateLink)); CAD.frame = JSON.parse(JSON.stringify(ORIG.frame)); CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); camGen = null; if (ORIG.spawn) CAD.spawn = JSON.parse(JSON.stringify(ORIG.spawn)); else delete CAD.spawn;
-    FFx.setGeom0(null); meshCache.clear(); refreshFrame(); MD.applied = false; MD.foam = null; $('thickFlag').style.display = 'none'; S.geom = { bot: 0, top: 0, W: 8 }; rebuildGLParts(); rebuildGlass(); newSim(); syncUI(); $('mdInfo').textContent = 'Using the built-in FoamFeed model.'; }
+  function mdOriginal() { CAD.parts = ORIG.parts.slice(); if (ORIG.gateLink) CAD.gateLink = JSON.parse(JSON.stringify(ORIG.gateLink)); CAD.frame = JSON.parse(JSON.stringify(ORIG.frame)); CAD.cam = JSON.parse(JSON.stringify(ORIG.cam)); freeCamGen(); if (ORIG.spawn) CAD.spawn = JSON.parse(JSON.stringify(ORIG.spawn)); else delete CAD.spawn;
+    FFx.setGeom0(null); mcClear(); refreshFrame(); MD.applied = false; MD.foam = null; $('thickFlag').style.display = 'none'; S.geom = { bot: 0, top: 0, W: 8 }; rebuildGLParts(); newSim(); syncUI(); $('mdInfo').textContent = 'Using the built-in FoamFeed model.'; }
   $('mdLoad').onclick = () => $('mdFile').click();
   $('mdFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     $('mdInfo').textContent = `Reading ${f.name}… (the first time also downloads the STEP reader, ~8 MB)`; await new Promise(r => setTimeout(r, 30));
     try { const t0 = performance.now(), ms = await readStep(f);
       MD.rows = ms.map(m => { const bb = bbOf(m.v); return { name: m.name, v: m.v, t: m.t, bb, role: guessRole(m.name, bb) }; });
       mdTable(); const fr = findConveyor(MD.rows), wh = fr.err ? null : findWheels(MD.rows, fr);
-      $('mdInfo').innerHTML = `Read ${MD.rows.length} solids from ${f.name} in ${((performance.now() - t0) / 1000).toFixed(1)} s. Check the roles, then press <b>Use this model</b>. ` + mdReport(fr, wh);
-    } catch (err) { $('mdInfo').innerHTML = `<span class="warn">${err.message}</span>`; } };
+      $('mdInfo').innerHTML = `Read ${MD.rows.length} solids from ${escHTML(f.name)} in ${((performance.now() - t0) / 1000).toFixed(1)} s. Check the roles, then press <b>Use this model</b>. ` + mdReport(fr, wh);
+    } catch (err) { $('mdInfo').innerHTML = `<span class="warn">${escHTML(err.message)}</span>`; } };
   $('mdFind').onclick = () => { const fr = findConveyor(MD.rows); $('mdInfo').textContent = mdReport(fr, fr.err ? null : findWheels(MD.rows, fr)); };
   $('mdApply').onclick = mdApply; $('mdOrig').onclick = mdOriginal;
   $('mdRepFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; const ks = MD.repRow; if (!f || !ks || ks < 0) return;
@@ -3713,7 +3787,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       const role = MD.rows[ks[0]].role, nm = baseName(MD.rows[ks[0]].name) + ' ← ' + f.name; const keep = MD.rows.filter((_, k) => !ks.includes(k));
       keep.splice(ks[0], 0, { name: nm, v: m.v, t: m.t, bb: bbOf(m.v), role }); MD.rows = keep; mdTable();
       if (MD.applied) mdApply(); else $('mdInfo').textContent = `Replaced with ${f.name}. Press Use this model to rebuild.`;
-    } catch (err) { $('mdInfo').innerHTML = `<span class="warn">${f.name}: ${err.message}</span>`; } };
+    } catch (err) { $('mdInfo').innerHTML = `<span class="warn">${escHTML(f.name)}: ${escHTML(err.message)}</span>`; } };
   function applyTire() { const sa = +$('tireMat').value, t = +$('tireT').value; S.tireA = sa; S.tireT = t; if (sim) { sim.P.tireE = shoreAtoE(sa); sim.P.tireT = t * 1e-3; } }
   function humAvg() { const h = sim && sim.hum; if (!h) return null; const d0 = sim.stats.delivered ? (sim.stats.gateOpenS || 0) / sim.stats.delivered : 0.25;
     const d = Math.min(1, +$('hmDoses').value * d0 / 86400), a = d / h.tauOpen, b = (1 - d) / h.tauDes; return { rh: (a * h.amb + b * h.des) / (a + b), perDose: d0, measured: !!sim.stats.delivered }; }
@@ -3737,7 +3811,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     sim.P.vib = { on: V.on, freq: V.freq, accel_g: V.accel_g, dir: vibAxis(V.axis) };
     const w = TAU * V.freq, amp = V.accel_g * 9.81 / (w * w) * 1e3, vel = V.accel_g * 9.81 / w * 1e3;
     $('vibBtn').textContent = V.on ? `🔊 Vibration ON — ${V.freq} Hz` : '🔈 Vibration OFF'; $('vibBtn').classList.toggle('pri', V.on);
-    $('vibInfo').innerHTML = `${V.accel_g} g peak at ${V.freq} Hz = ±${amp < 0.1 ? amp.toFixed(3) : amp.toFixed(2)} mm, ${vel.toFixed(0)} mm/s peak` + (V.accel_g > 1 ? ' · <span class="warn">above 1 g: pills hop each cycle</span>' : '');
+    $('vibInfo').innerHTML = `${escHTML(V.accel_g)} g peak at ${escHTML(V.freq)} Hz = ±${amp < 0.1 ? amp.toFixed(3) : amp.toFixed(2)} mm, ${vel.toFixed(0)} mm/s peak` + (V.accel_g > 1 ? ' · <span class="warn">above 1 g: pills hop each cycle</span>' : '');
   }
   $('vibBtn').onclick = () => { S.vib.on = !S.vib.on; applyVib(); };
   $('vibF').oninput = e => { S.vib.freq = +e.target.value; $('vibFV').textContent = e.target.value; applyVib(); };
@@ -3772,6 +3846,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   let st = {}; try { st = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} };
   const toast = $('ffToast'); if (toast) document.body.appendChild(toast);
+  { const css = document.createElement('style'); css.textContent = '@media (max-width:820px){#uiFind{font-size:16px!important}}'; document.head.appendChild(css); }   // iOS zooms on inputs under 16px
+  const setOpen = (sec, o) => { sec.classList.toggle('open', o); const h = sec.querySelector('.sech'); if (h) h.setAttribute('aria-expanded', String(o)); };
   // natural first-time workflow: 1 choose pills -> 2 run it -> 3 change the machine -> 4 environment; right side: results, then tools
   const ORDER = { L: ['Pills', 'Dispenser bank', 'Sensors & feed control', 'Drive', 'Vibration (speaker)', 'Machine model', 'Geometry', 'Foam belts', 'Belt layout', 'Hopper throat', 'Singulator (bump at the entry)', 'Belt texture', 'Imported parts', 'Humidity (chamber)'],
                   R: ['Dispensing', 'Pill loads', 'Belts', 'Dust', 'Tack', 'Trial runner', 'View', 'Simulation'] };
@@ -3810,8 +3886,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       if (STEP[c.title]) { const sh = document.createElement('div'); sh.className = 'stepH'; sh.textContent = STEP[c.title]; aside.appendChild(sh); }
       const body = document.createElement('div'); body.className = 'secb'; for (const n of c.nodes) body.appendChild(n);
       sec.append(h, body); aside.appendChild(sec);
-      const open = st[c.title] != null ? st[c.title] : OPEN.has(c.title); sec.classList.toggle('open', open);
-      h.onclick = () => { const o = !sec.classList.contains('open'); sec.classList.toggle('open', o); st[c.title] = o; save(); };
+      const open = st[c.title] != null ? st[c.title] : OPEN.has(c.title); setOpen(sec, open);
+      h.onclick = () => { const o = !sec.classList.contains('open'); setOpen(sec, o); st[c.title] = o; save(); };
       sections.push({ sec, side, title: c.title });
     }
   }
@@ -3831,20 +3907,20 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   group('Sensors & feed control', 'Sensor setup (S1–S3: position, beam, timing)', 'snSel', 'snEdge');
   // toolbar: search + expand/collapse + notes
   const left = document.querySelector('#app > aside:not(.r)'), bar = document.createElement('div'); bar.id = 'uiTools';
-  bar.innerHTML = '<input id="uiFind" type="search" placeholder="Find a setting…"><button id="uiOpen" title="open every section">⊞</button><button id="uiClose" title="close every section">⊟</button><button id="uiNotes" title="show / hide the explanation notes">ⓘ</button>';
+  bar.innerHTML = '<input id="uiFind" type="search" placeholder="Find a setting…" aria-label="find a setting"><button id="uiOpen" title="open every section" aria-label="open every section">⊞</button><button id="uiClose" title="close every section" aria-label="close every section">⊟</button><button id="uiNotes" title="show / hide the explanation notes" aria-label="show or hide the explanation notes">ⓘ</button>';
   left.insertBefore(bar, left.firstChild);
-  const setAll = o => { for (const x of sections) { x.sec.classList.toggle('open', o); st[x.title] = o; } save(); };
+  const setAll = o => { for (const x of sections) { setOpen(x.sec, o); st[x.title] = o; } save(); };
   $('uiOpen').onclick = () => setAll(true); $('uiClose').onclick = () => setAll(false);
   if (st.__notes === false || st.__notes == null) document.body.classList.add('nonotes');
   $('uiNotes').onclick = () => { const off = document.body.classList.toggle('nonotes'); st.__notes = !off; save(); };
   $('uiFind').oninput = () => {
     const q = $('uiFind').value.trim().toLowerCase();
     for (const x of sections) {
-      const body = x.sec.querySelector('.secb'), items = body.querySelectorAll('.row, .kv > b, .btns, details.grp');
-      if (!q) { x.sec.classList.remove('ff-hide'); x.sec.classList.toggle('open', st[x.title] != null ? st[x.title] : OPEN.has(x.title)); body.querySelectorAll('.ff-hide').forEach(e => e.classList.remove('ff-hide')); continue; }
+      const body = x.sec.querySelector('.secb');
+      if (!q) { x.sec.classList.remove('ff-hide'); setOpen(x.sec, st[x.title] != null ? st[x.title] : OPEN.has(x.title)); body.querySelectorAll('.ff-hide').forEach(e => e.classList.remove('ff-hide')); continue; }
       const tmatch = (x.title + ' ' + (NAME[x.title] || '')).toLowerCase().includes(q); let any = tmatch;
       body.querySelectorAll('.row, .btns').forEach(r => { const hit = tmatch || (r.textContent + ' ' + [...r.querySelectorAll('[title]')].map(e => e.title).join(' ')).toLowerCase().includes(q); r.classList.toggle('ff-hide', !hit); if (hit) { any = true; const d = r.closest('details'); if (d) d.open = true; } });
-      x.sec.classList.toggle('ff-hide', !any); x.sec.classList.toggle('open', any);
+      x.sec.classList.toggle('ff-hide', !any); setOpen(x.sec, any);
     }
   };
   // one-line summaries on closed cards
@@ -3883,7 +3959,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     call: { cat: 'input', label: 'Dispense button', help: 'Pulses for one tick each time a dose is called (the Dispense button, the dock, or a bank call). "pending" is how many more calls are waiting.',
       ins: [], outs: [['pressed', NB], ['pending', NN]], p: [],
       ev: (I, P, S, X) => { const C = X.C; let pr = false; if ((C.Lcall || 0) > 0 && !X.callTaken) { C.Lcall--; pr = true; X.callTaken = true; } return [pr, C.Lcall || 0]; },
-      cpp: (I, P, O, s) => [`${O[0]} = callPressed; ${O[1]} = 0;`] },
+      cpp: (I, P, O) => [`${O[0]} = callPending > 0; if (${O[0]}) callPending--; ${O[1]} = callPending;`] },
     toggle: { cat: 'input', label: 'Switch', help: 'A switch you flip by hand (also while the sim runs) to try things out.', ins: [], outs: [['on', NB]], p: [{ k: 'on', l: 'On', type: 'bool', def: false }],
       sub: P => P.on ? 'ON' : 'off', ev: (I, P) => [!!P.on], cpp: (I, P, O) => [`${O[0]} = ${P.on ? 'true' : 'false'};`] },
     number: { cat: 'input', label: 'Number', help: 'A value to tune: drag its slider while the sim runs and watch the effect.', ins: [], outs: [['value', NN]],
@@ -3911,19 +3987,19 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     ton: { cat: 'time', label: 'Delay on', help: 'Output turns on once the input has been on for the delay (and off as soon as the input drops). Filters out short blips.', ins: [['in', NB]], outs: [['out', NB], ['elapsed s', NN]],
       p: [{ k: 'ms', l: 'Delay', type: 'num', def: 200, min: 0, max: 10000, step: 1, unit: 'ms' }], sub: P => P.ms + ' ms',
       ev: (I, P, S, X) => { if (B(I[0])) S.e = (S.e || 0) + X.dt; else S.e = 0; return [B(I[0]) && S.e >= P.ms * 1e-3 - 1e-9, S.e]; },
-      cpp: (I, P, O, s) => [`if (${I[0]}) ${s}e += DT; else ${s}e = 0; ${O[0]} = (${I[0]}) && ${s}e >= ${f(P.ms / 1000)}; ${O[1]} = ${s}e;`], st: s => [`float ${s}e = 0;`] },
+      cpp: (I, P, O, s) => [`if (${I[0]}) { if (${s}e < TICK_MAX) ${s}e++; } else ${s}e = 0; ${O[0]} = (${I[0]}) && ${s}e >= ${tk(P.ms)}; ${O[1]} = ${s}e * DT;`], st: s => [`unsigned long ${s}e = 0;   // ticks`] },
     tof: { cat: 'time', label: 'Delay off', help: 'Output turns on with the input and stays on for the delay after the input drops (e.g. keep the gate open a little after the pill passes).', ins: [['in', NB]], outs: [['out', NB]],
       p: [{ k: 'ms', l: 'Hold', type: 'num', def: 400, min: 0, max: 10000, step: 1, unit: 'ms' }], sub: P => P.ms + ' ms',
       ev: (I, P, S, X) => { if (B(I[0])) S.e = 0; else S.e = (S.e == null ? 1e9 : S.e) + X.dt; return [B(I[0]) || S.e < P.ms * 1e-3 - 1e-9]; },
-      cpp: (I, P, O, s) => [`if (${I[0]}) ${s}e = 0; else ${s}e += DT; ${O[0]} = (${I[0]}) || ${s}e < ${f(P.ms / 1000)};`], st: s => [`float ${s}e = 1e9;`] },
+      cpp: (I, P, O, s) => [`if (${I[0]}) ${s}e = 0; else if (${s}e < TICK_MAX) ${s}e++; ${O[0]} = (${I[0]}) || ${s}e < ${tk(P.ms)};`], st: s => [`unsigned long ${s}e = TICK_MAX;   // ticks since the input dropped`] },
     pulse: { cat: 'time', label: 'Pulse', help: 'When the trigger turns on, output a pulse of fixed length (re-triggering while it runs is ignored).', ins: [['trigger', NB]], outs: [['out', NB]],
       p: [{ k: 'ms', l: 'Length', type: 'num', def: 300, min: 1, max: 10000, step: 1, unit: 'ms' }], sub: P => P.ms + ' ms',
-      ev: (I, P, S, X) => { const v = B(I[0]); if (v && !S.p && !(S.r > 0)) S.r = P.ms * 1e-3; S.p = v; const on = S.r > 0; if (on) S.r -= X.dt; return [on]; },
-      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p && ${s}r <= 0) ${s}r = ${f(P.ms / 1000)}; ${s}p = v; ${O[0]} = ${s}r > 0; if (${s}r > 0) ${s}r -= DT; }`], st: s => [`bool ${s}p = false; float ${s}r = 0;`] },
+      ev: (I, P, S, X) => { const v = B(I[0]); if (v && !S.p && !(S.r > 1e-9)) S.r = P.ms * 1e-3; S.p = v; const on = S.r > 1e-9; if (on) S.r -= X.dt; return [on]; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p && ${s}r == 0) ${s}r = ${Math.max(1, tk(P.ms))}; ${s}p = v; ${O[0]} = ${s}r > 0; if (${s}r > 0) ${s}r--; }`], st: s => [`bool ${s}p = false; unsigned long ${s}r = 0;   // ticks left`] },
     osc: { cat: 'time', label: 'Oscillator', help: 'Square wave while enabled: on for duty % of every period. Good for pulsing the vibrator or testing an actuator.', ins: [['enable', NB, 't']], outs: [['out', NB]], dflt: true,
       p: [{ k: 'ms', l: 'Period', type: 'num', def: 500, min: 2, max: 20000, step: 1, unit: 'ms' }, { k: 'duty', l: 'Duty', type: 'num', def: 50, min: 0, max: 100, step: 1, unit: '%' }], sub: P => `${P.ms} ms · ${P.duty}%`,
-      ev: (I, P, S, X) => { if (!B(I[0])) { S.ph = 0; return [false]; } S.ph = ((S.ph || 0) + X.dt) % (P.ms * 1e-3); return [S.ph < P.ms * 1e-3 * P.duty / 100]; },
-      cpp: (I, P, O, s) => [`if (!(${I[0]})) { ${s}ph = 0; ${O[0]} = false; } else { ${s}ph = fmod(${s}ph + DT, ${f(P.ms / 1000)}); ${O[0]} = ${s}ph < ${f(P.ms / 1000 * P.duty / 100)}; }`], st: s => [`float ${s}ph = 0;`] },
+      ev: (I, P, S, X) => { if (!B(I[0])) { S.ph = 0; return [false]; } const per = P.ms * 1e-3; S.ph = (S.ph || 0) + X.dt; if (S.ph >= per - 1e-9) S.ph = Math.max(0, S.ph - per * Math.floor((S.ph + 1e-9) / per)); return [S.ph < per * P.duty / 100 - 1e-9]; },
+      cpp: (I, P, O, s) => [`if (!(${I[0]})) { ${s}ph = 0; ${O[0]} = false; } else { if (++${s}ph >= ${Math.max(1, Math.round(P.ms / LOOP))}) ${s}ph = 0; ${O[0]} = ${s}ph < ${tk(P.ms * P.duty / 100)}; }`], st: s => [`unsigned long ${s}ph = 0;   // ticks into the period (a period that is not a whole number of ticks is rounded)`] },
     latch: { cat: 'mem', label: 'Latch (set / reset)', help: 'Remembers: "set" turns it on, "reset" turns it off, and it stays that way in between. The core of "run until the sensor sees the pill".', ins: [['set', NB], ['reset', NB]], outs: [['on', NB], ['off', NB]],
       p: [{ k: 'pri', l: 'If both', type: 'sel', def: 'reset', opts: [['reset wins', 'reset'], ['set wins', 'set']] }],
       ev: (I, P, S) => { const st = B(I[0]), rs = B(I[1]); if (st && rs) S.q = P.pri === 'set'; else if (st) S.q = true; else if (rs) S.q = false; return [!!S.q, !S.q]; },
@@ -3934,7 +4010,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     counter: { cat: 'mem', label: 'Counter', help: 'Counts each time "count" turns on; "done" is true once it reaches the target. "reset" sets it back to 0.', ins: [['count', NB], ['reset', NB]], outs: [['value', NN], ['done', NB]],
       p: [{ k: 'n', l: 'Target', type: 'num', def: 1, min: 1, max: 100, step: 1 }], sub: P => '→ ' + P.n,
       ev: (I, P, S) => { const v = B(I[0]); if (B(I[1])) S.c = 0; else if (v && !S.p) S.c = (S.c || 0) + 1; S.p = v; return [S.c || 0, (S.c || 0) >= P.n]; },
-      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (${I[1]}) ${s}c = 0; else if (v && !${s}p) ${s}c++; ${s}p = v; ${O[0]} = ${s}c; ${O[1]} = ${s}c >= ${Math.round(P.n)}; }`], st: s => [`bool ${s}p = false; long ${s}c = 0;`] },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (${I[1]}) ${s}c = 0; else if (v && !${s}p) ${s}c++; ${s}p = v; ${O[0]} = ${s}c; ${O[1]} = ${s}c >= ${Math.ceil(P.n - 1e-9)}; }`], st: s => [`bool ${s}p = false; long ${s}c = 0;`] },
     hold: { cat: 'mem', label: 'Sample & hold', help: 'Grabs the value at the moment the trigger turns on and keeps it.', ins: [['value', NN], ['trigger', NB]], outs: [['held', NN]], p: [],
       ev: (I, P, S) => { const v = B(I[1]); if (v && !S.p) S.h = N(I[0]); S.p = v; return [S.h || 0]; },
       cpp: (I, P, O, s) => [`{ bool v = ${I[1]}; if (v && !${s}p) ${s}h = ${I[0]}; ${s}p = v; ${O[0]} = ${s}h; }`], st: s => [`bool ${s}p = false; float ${s}h = 0;`] },
@@ -3949,16 +4025,16 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     smooth: { cat: 'math', label: 'Smooth', help: 'Eases a value toward its input with a time constant (a soft start / soft stop).', ins: [['value', NN]], outs: [['result', NN]],
       p: [{ k: 'ms', l: 'Time const.', type: 'num', def: 200, min: 1, max: 10000, step: 1, unit: 'ms' }], sub: P => 'τ ' + P.ms + ' ms',
       ev: (I, P, S, X) => { const v = N(I[0]); if (S.y == null) S.y = v; S.y += (v - S.y) * Math.min(1, X.dt / (P.ms * 1e-3)); return [S.y]; },
-      cpp: (I, P, O, s) => [`${s}y += ((${I[0]}) - ${s}y) * fminf(1.0f, DT / ${f(P.ms / 1000)}f); ${O[0]} = ${s}y;`], st: s => [`float ${s}y = 0;`] },
+      cpp: (I, P, O, s) => [`{ float v = ${I[0]}; if (!${s}i) { ${s}y = v; ${s}i = true; } ${s}y += (v - ${s}y) * fminf(1.0f, DT / ${f(P.ms / 1000)}f); ${O[0]} = ${s}y; }`], st: s => [`float ${s}y = 0; bool ${s}i = false;`] },
     send: { cat: 'sig', label: 'Send signal', help: 'Puts a value on a named channel. Any "Receive signal" with the same name gets it on the next tick — use it to keep big graphs tidy.', ins: [['value', NN]], outs: [],
-      p: [{ k: 'ch', l: 'Channel', type: 'text', def: 'ready' }], sub: P => '→ ' + P.ch, ev: (I, P, S, X) => { X.sigN[P.ch] = I[0]; return []; }, cpp: (I, P) => [`sigNext[${'SIG_' + cid(P.ch)}] = ${I[0]};`] },
+      p: [{ k: 'ch', l: 'Channel', type: 'text', def: 'ready' }], sub: P => '→ ' + P.ch, ev: (I, P, S, X) => { X.sigN[P.ch] = I[0]; return []; }, cpp: (I, P) => [`sigNext[${sigId(P.ch)}] = ${I[0]};`] },
     recv: { cat: 'sig', label: 'Receive signal', help: 'Reads a named channel (the value sent on the previous tick).', ins: [], outs: [['value', NN], ['on', NB]],
-      p: [{ k: 'ch', l: 'Channel', type: 'text', def: 'ready' }], sub: P => '← ' + P.ch, ev: (I, P, S, X) => { const v = X.sig[P.ch]; return [N(v ?? 0), B(v ?? false)]; }, cpp: (I, P, O) => [`${O[0]} = sig[${'SIG_' + cid(P.ch)}]; ${O[1]} = ${O[0]} != 0;`] },
+      p: [{ k: 'ch', l: 'Channel', type: 'text', def: 'ready' }], sub: P => '← ' + P.ch, ev: (I, P, S, X) => { const v = X.sig[P.ch]; return [N(v ?? 0), B(v ?? false)]; }, cpp: (I, P, O) => [`${O[0]} = sig[${sigId(P.ch)}]; ${O[1]} = ${O[0]} != 0;`] },
     watch: { cat: 'sig', label: 'Watch', help: 'Shows a value big on the block — handy while tuning.', ins: [['value', NN]], outs: [], p: [], ev: (I, P, S) => { S.v = I[0]; return []; }, cpp: () => [] },
     log: { cat: 'sig', label: 'Log message', help: 'Writes a line to the log (and to Serial on the board) each time the input turns on.', ins: [['when', NB]], outs: [],
       p: [{ k: 'msg', l: 'Message', type: 'text', def: 'pill counted' }], sub: P => '“' + P.msg + '”',
       ev: (I, P, S, X) => { const v = B(I[0]); if (v && !S.p) X.log.push([X.t, P.msg]); S.p = v; return []; },
-      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p) { Serial.print(millis() / 1000.0, 3); Serial.println(F(" ${String(P.msg).replace(/["\\]/g, '')}")); } ${s}p = v; }`], st: s => [`bool ${s}p = false;`] },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p) { Serial.print(millis() / 1000.0, 3); Serial.println(F(" ${cmt(P.msg).replace(/"/g, '')}")); } ${s}p = v; }`], st: s => [`bool ${s}p = false;`] },
     motor: { cat: 'act', label: 'Conveyor motor', help: 'Runs the belt stepper while "run" is on, at the given belt-drive rpm (ramped by the Ramp setting in Dispense control). "reverse" runs it backwards.', ins: [['run', NB], ['rpm', NN, 'rpm'], ['reverse', NB]], outs: [],
       p: [{ k: 'rpm', l: 'Speed', type: 'num', def: 12, min: 0, max: 60, step: 0.5, unit: 'rpm' }], sub: P => P.rpm + ' rpm',
       ev: (I, P, S, X) => { X.L.motor = B(I[0]); X.L.rpm = Math.abs(N(I[1])); X.L.dir = B(I[2]) ? -1 : 1; return []; },
@@ -3971,7 +4047,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     safety: { cat: 'act', label: 'Safety gate', help: 'Pushes the pill-width safety gate in (open to the pill\'s width) while the input is on; spring-closed otherwise.', ins: [['open', NB]], outs: [], p: [],
       ev: (I, P, S, X) => { X.L.safety = B(I[0]); return []; }, cpp: I => [`outSafety = ${I[0]};`] },
   };
-  const cid = s => String(s || 'x').replace(/[^A-Za-z0-9_]/g, '_').toUpperCase();
+  // export context: LOOP = exported loop ms, SIG = channel name -> number; tk(ms) = the tick on which the sim's timer fires
+  let LOOP = 1, SIG = new Map();
+  const tk = ms => Math.max(0, Math.ceil(ms / LOOP - 1e-6)), sigId = ch => 'SIG_' + SIG.get(String(ch));
+  const cmt = x => String(x).replace(/[\r\n\\]/g, ' ');   // safe inside a // comment or a C string (no line break, no trailing \)
   const ACTIONS = new Set(['motor', 'vib', 'gate', 'safety']);
 
   // ---------------------------------------------------------------- graph model
@@ -3994,114 +4073,179 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   }
 
   // ---------------------------------------------------------------- compiler (sim)
-  function order() {
-    const ids = G.nodes.map(n => n.id), indeg = new Map(ids.map(i => [i, 0])), out = new Map(ids.map(i => [i, []]));
-    for (const l of G.links) if (indeg.has(l.to[0]) && out.has(l.from[0]) && l.from[0] !== l.to[0]) { indeg.set(l.to[0], indeg.get(l.to[0]) + 1); out.get(l.from[0]).push(l.to[0]); }
-    const q = ids.filter(i => indeg.get(i) === 0), res = [], seen = new Set();
-    while (q.length) { const i = q.shift(); if (seen.has(i)) continue; seen.add(i); res.push(i); for (const j of out.get(i)) { indeg.set(j, indeg.get(j) - 1); if (indeg.get(j) === 0) q.push(j); } }
-    for (const i of ids) if (!seen.has(i)) res.push(i);   // feedback loops: those read the previous tick's value
+  function order() {   // topological order; feedback loops are cut at their back edges (found by DFS in id order), which read the previous tick
+    const ids = G.nodes.map(n => n.id), out = new Map(ids.map(i => [i, []]));
+    for (const l of G.links) if (out.has(l.from[0]) && out.has(l.to[0]) && l.from[0] !== l.to[0]) out.get(l.from[0]).push(l.to[0]);
+    const mark = new Map(), back = new Set(), dfs = u => { mark.set(u, 1); for (const v of out.get(u)) { if (mark.get(v) === 1) back.add(u + '>' + v); else if (!mark.has(v)) dfs(v); } mark.set(u, 2); };
+    for (const i of ids) if (!mark.has(i)) dfs(i);
+    const indeg = new Map(ids.map(i => [i, 0])); for (const [u, vs] of out) for (const v of vs) if (!back.has(u + '>' + v)) indeg.set(v, indeg.get(v) + 1);
+    const q = ids.filter(i => indeg.get(i) === 0), res = [];
+    while (q.length) { const i = q.shift(); res.push(i); for (const j of out.get(i)) if (!back.has(i + '>' + j)) { indeg.set(j, indeg.get(j) - 1); if (indeg.get(j) === 0) q.push(j); } }
     const byId = new Map(G.nodes.map(n => [n.id, n])); return res.map(i => byId.get(i));
   }
-  let RT = null;   // runtime: { fn, vals, state, sig, log }
-  function compile() {
-    const seq = order(), vals = new Map(), state = new Map(), R = { vals, state, sig: {}, log: [], ticks: 0 };
-    for (const n of G.nodes) { vals.set(n.id, T[n.t].outs.map(o => o[1] === NB ? false : 0)); state.set(n.id, {}); }
+  let RT = null;   // runtime: { fn, vals, state, types, sig, log }
+  function compile(prev) {   // prev: keep the memory of blocks that survive an edit (same id and type)
+    const seq = order(), vals = new Map(), state = new Map(), types = new Map(), R = { vals, state, types, sig: prev ? prev.sig : Object.create(null), log: prev ? prev.log : [] };
+    for (const n of G.nodes) { const keep = prev && prev.types.get(n.id) === n.t; types.set(n.id, n.t);
+      vals.set(n.id, keep ? prev.vals.get(n.id) : T[n.t].outs.map(o => o[1] === NB ? false : 0)); state.set(n.id, keep ? prev.state.get(n.id) : {}); }
     const plan = seq.map(n => { const ty = T[n.t]; return { n, ty, src: ty.ins.map((_, ii) => { const l = linkTo(n.id, ii); return l ? [l.from[0], l.from[1]] : null; }) }; });
+    const hasCall = G.nodes.some(n => n.t === 'call');
     R.fn = (sim, C, dt) => {
-      const X = { t: sim.t, dt, sim, C, sig: R.sig, sigN: Object.assign({}, R.sig), L: (C.L = { motor: false, rpm: 0, dir: 1, vib: false, vibAmt: 1, gate: false, safety: false }), log: R.log, callTaken: false };
+      const X = { t: sim.t, dt, sim, C, sig: R.sig, sigN: Object.assign(Object.create(null), R.sig), L: (C.L = { motor: false, rpm: 0, dir: 1, vib: false, vibAmt: 1, gate: false, safety: false }), log: R.log, callTaken: false };
+      if (!hasCall) C.Lcall = 0;   // nothing reads the calls: drop them, or the bank queue waits forever
       for (const st of plan) { const n = st.n, ty = st.ty, I = new Array(st.src.length);
         for (let ii = 0; ii < st.src.length; ii++) { const s = st.src[ii], def = ty.ins[ii]; if (s) { const v = vals.get(s[0]); I[ii] = v ? v[s[1]] : 0; } else I[ii] = def[2] === 't' ? true : def[2] ? n.p[def[2]] : (def[1] === NB ? (ty.dflt ? true : false) : 0); }
         const o = ty.ev(I, n.p, state.get(n.id), X); if (o.length) vals.set(n.id, o); }
-      R.sig = X.sigN; R.ticks++; if (R.log.length > 300) R.log.splice(0, R.log.length - 300);
+      R.sig = X.sigN; if (R.log.length > 300) R.log.splice(0, R.log.length - 300);
     };
     return R;
   }
 
   // ---------------------------------------------------------------- code export
+  function maxRpm() {   // highest belt rpm the graph can ask for (unknown sources count as the motor slider's 60)
+    const bound = (nid, port, d) => { const n = G.nodes.find(q => q.id === nid); if (!n || d > 20) return 60;
+      const inp = (ii, dflt) => { const l = linkTo(n.id, ii); return l ? bound(l.from[0], l.from[1], d + 1) : Math.abs(dflt); };
+      if (n.t === 'number') return Math.abs(n.p.v); if (n.t === 'ifte') return Math.max(inp(1, n.p.a), inp(2, n.p.b));
+      if (n.t === 'scale') return Math.max(Math.abs(n.p.b0), Math.abs(n.p.b1)); if (n.t === 'smooth') return inp(0, 0);
+      if (n.t === 'toggle' || T[n.t].outs[port] && T[n.t].outs[port][1] === NB) return 1; return 60; };
+    let m = 0; for (const n of G.nodes) if (n.t === 'motor') { const l = linkTo(n.id, 1); m = Math.max(m, l ? bound(l.from[0], l.from[1], 0) : Math.abs(n.p.rpm)); }
+    return m;
+  }
   function exportCpp() {
-    const seq = order(), dec = [], st = [], body = [], ch = new Set();
-    for (const n of G.nodes) if (n.t === 'send' || n.t === 'recv') ch.add(cid(n.p.ch));
+    LOOP = Math.max(1, Math.round(G.loop_ms * 1000) / 1000);   // the board's tick: at least 1 ms (a faster loop can't keep up with the stepper)
+    SIG = new Map(); for (const n of G.nodes) if ((n.t === 'send' || n.t === 'recv') && !SIG.has(String(n.p.ch))) SIG.set(String(n.p.ch), SIG.size);
+    const seq = order(), dec = [], st = [], body = [], hasCall = G.nodes.some(n => n.t === 'call');
     const V = (n, oi) => `n${n.id}_${oi}`;
     for (const n of seq) { const ty = T[n.t];
       ty.outs.forEach((o, oi) => dec.push(`${o[1] === NB ? 'bool' : 'float'} ${V(n, oi)} = 0;   // ${ty.label} #${n.id}: ${o[0]}`));
       const s = `s${n.id}_`; if (ty.st) st.push(...ty.st(s));
       const I = ty.ins.map((d, ii) => { const l = linkTo(n.id, ii); if (l) { const src = G.nodes.find(q => q.id === l.from[0]); if (src) return V(src, l.from[1]); }
         return d[2] === 't' ? 'true' : d[2] ? f(n.p[d[2]]) : d[1] === NB ? (ty.dflt ? 'true' : 'false') : '0'; });
-      body.push(`  // ${ty.label} #${n.id}${ty.sub ? ' (' + ty.sub(n.p) + ')' : ''}`, ...ty.cpp(I, n.p, ty.outs.map((_, oi) => V(n, oi)), s).map(x => '  ' + x)); }
-    const c = (window.__FF && __FF.ctS && __FF.ctS()) || {}, chs = [...ch];
-    return `// FoamFeed custom logic — "${G.name}" — exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')}
-// Arduino sketch (Uno / Nano / ESP32). Needs the AccelStepper library (Library Manager). Edit the pins and the
-// hardware constants below to match your wiring. The logic runs every LOOP_MS, exactly as in the simulator.
+      body.push(`  // ${ty.label} #${n.id}${ty.sub ? ' (' + cmt(ty.sub(n.p)) + ')' : ''}`, ...ty.cpp(I, n.p, ty.outs.map((_, oi) => V(n, oi)), s).map(x => '  ' + x)); }
+    const c = (window.__FF && __FF.ctS && __FF.ctS()) || {}, sens = [0, 1, 2].map(k => Object.assign({ on: true, response_ms: 0.5, min_block_ms: 1, min_clear_ms: 5, count_on: 'break' }, (c.sensors || [])[k] || {}));
+    const us = ms => Math.max(0, Math.round((+ms || 0) * 1000)), arr = fn => sens.map(fn).join(', '), rpm = maxRpm(), chs = [...SIG];
+    return `// FoamFeed custom logic — "${cmt(G.name)}" — exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')}
+// Arduino sketch for AVR (Uno / Nano) or ESP32 (DevKit). Libraries (Library Manager): AccelStepper, plus ESP32Servo on ESP32.
+// Edit the pins and the hardware constants below to match your wiring. The logic runs block for block as in the
+// simulator, every LOOP_US; timers count whole ticks, so they fire on the same tick as in the sim.
 #include <AccelStepper.h>
-#include <Servo.h>   // ESP32: use ESP32Servo.h
+#ifdef ESP32
+#include <ESP32Servo.h>
+#else
+#include <Servo.h>
+#endif
 
 // ---------- wiring ----------
-const int PIN_SENSOR[3] = {2, 3, 4};      // S1 probe, S2 exit, S3 out (IR beam receivers)
-const bool SENSOR_ACTIVE_LOW = true;      // true: the receiver pulls LOW when the beam is blocked
+#ifdef ESP32
+// ESP32 DevKit: avoids flash pins 6-11, strapping pins 0/2/5/12/15, input-only 34-39 (no pull-ups) and PSRAM pins 16/17
+const int PIN_SENSOR[3] = {32, 33, 25};   // S1 probe, S2 exit, S3 out (IR beam receivers)
+const int PIN_CALL = 27;                  // dispense push button (to GND, internal pull-up); the host can also send 'd' on Serial
+const int PIN_STEP = 18, PIN_DIR = 19, PIN_EN = 23;   // stepper driver (A4988 / TMC2209 in step-dir mode)
+const int PIN_VIB = 26;                   // vibrator driver (PWM)
+const int PIN_GATE = 21, PIN_SAFETY = 22; // MG90S servo gate, safety gate servo
+#else
+// Uno / Nano: the Servo library takes Timer1 (no PWM on 9/10), so the vibrator PWM is on pin 3 (Timer2); 0/1 = Serial
+const int PIN_SENSOR[3] = {2, 4, 8};      // S1 probe, S2 exit, S3 out (IR beam receivers)
 const int PIN_CALL = 12;                  // dispense push button (to GND, internal pull-up); the host can also send 'd' on Serial
 const int PIN_STEP = 5, PIN_DIR = 6, PIN_EN = 7;   // stepper driver (A4988 / TMC2209 in step-dir mode)
-const int PIN_VIB = 9;                    // vibrator driver (PWM)
-const int PIN_GATE = 10, PIN_SAFETY = 11; // MG90S servo gate, safety gate servo
+const int PIN_VIB = 3;                    // vibrator driver (PWM, Timer2)
+const int PIN_GATE = 9, PIN_SAFETY = 10;  // MG90S servo gate, safety gate servo
+#endif
+const bool SENSOR_ACTIVE_LOW = true;      // true: the receiver pulls LOW when the beam is blocked
 
 // ---------- hardware constants ----------
-const float LOOP_MS = ${f(G.loop_ms)};
-const float DT = LOOP_MS / 1000.0;
-const float MOTOR_STEPS_PER_REV = 200.0 * 16;   // 1.8 deg stepper x 16 microsteps
-const float GEAR_RATIO = 20.0;                   // worm 20:1 — the logic's rpm is the belt-drive shaft rpm
+const unsigned long LOOP_US = ${Math.round(LOOP * 1000)}UL;   // logic tick${G.loop_ms < 1 ? ` (the sim used ${f(G.loop_ms)} ms; the board needs at least 1 ms, timers are converted to ms)` : ''}
+const float DT = LOOP_US / 1000000.0;
+const unsigned long TICK_MAX = 4000000000UL;      // timer counters stop here instead of wrapping
+#define MICROSTEPS 4                    // driver microstep setting (MS pins / TMC config); keep steps/s under ~4000 on AVR
+#define GEAR_RATIO 20                   // worm 20:1 — the logic's rpm is the belt-drive shaft rpm
+#define MAX_RPM_X10 ${Math.ceil(rpm * 10)}                  // highest belt rpm this graph asks for, x10 (${f(Math.round(rpm * 10) / 10)} rpm)
+const float MOTOR_STEPS_PER_REV = 200.0 * MICROSTEPS;   // 1.8 deg stepper
+#if defined(__AVR__) && (MAX_RPM_X10 * 200L * MICROSTEPS * GEAR_RATIO / 600) > 4000
+#warning "steps/s at this graph's top rpm is over ~4000, more than AccelStepper can step on a 16 MHz AVR: lower MICROSTEPS or the rpm"
+#endif
 const float RAMP_MS = ${f(c.ramp_ms ?? 20)};                      // time to reach full speed (as in the sim's ramp setting)
 const int GATE_CLOSED_DEG = 0, GATE_OPEN_DEG = 120;     // tune to the linkage
 const int SAFETY_CLOSED_DEG = 0, SAFETY_OPEN_DEG = 90;
-const unsigned long SENSOR_MIN_BLOCK_US = 1000, SENSOR_MIN_CLEAR_US = 5000;   // debounce, as the sim's sensor settings
+// per-sensor settings from the sim (Dispense control & sensors). The sim's response time (${arr(x => f(+x.response_ms || 0))} ms) is the
+// receiver's own lag; the real receiver has it, so it is not added here.
+const bool SENSOR_ON[3] = {${arr(x => x.on !== false ? 'true' : 'false')}};
+const unsigned long SENSOR_MIN_BLOCK_US[3] = {${arr(x => us(x.min_block_ms) + 'UL')}};   // a block must last this long to count
+const unsigned long SENSOR_MIN_CLEAR_US[3] = {${arr(x => us(x.min_clear_ms ?? 5) + 'UL')}};   // light shorter than this = still the same pill
+const bool SENSOR_COUNT_ON_CLEAR[3] = {${arr(x => x.count_on === 'clear' ? 'true' : 'false')}};   // count when the beam clears (else once the block is confirmed)
+const unsigned long CALL_DEBOUNCE_US = 20000;   // push-button debounce
 
 AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
 Servo gateServo, safetyServo;
 long sensorCount[3] = {0, 0, 0};
-bool sensorState[3] = {false, false, false};
-unsigned long sensorEdgeUs[3] = {0, 0, 0};
-bool callPressed = false, callBtnPrev = false;
-${chs.length ? `enum { ${chs.map(x => 'SIG_' + x).join(', ')}, SIG_N };\nfloat sig[SIG_N], sigNext[SIG_N];` : '// (no signal channels used)'}
+bool sensorState[3] = {false, false, false}, sensorRaw[3] = {false, false, false}, sensorArmed[3] = {false, false, false}, sensorClearing[3] = {false, false, false};
+unsigned long sensorOnUs[3] = {0, 0, 0}, sensorOffUs[3] = {0, 0, 0};
+long callPending = 0;   // dispense calls not yet taken by a Dispense-button block
+bool callBtn = false, callBtnRaw = false; unsigned long callBtnUs = 0;
+${chs.length ? chs.map(([nm, i]) => `// SIG_${i} = channel "${cmt(nm)}"`).join('\n') + `\nenum { ${chs.map(([, i]) => 'SIG_' + i).join(', ')}, SIG_COUNT };\nfloat sig[SIG_COUNT], sigNext[SIG_COUNT];` : '// (no signal channels used)'}
 bool outMotor = false, outGate = false, outSafety = false; float outRpm = 0, outDir = 1, outVib = 0, motorRpm = 0;
 
 // ---------- block outputs and memory ----------
 ${dec.join('\n')}
 ${st.join('\n')}
 
-// debounced beam: a block must last SENSOR_MIN_BLOCK_US, a clear SENSOR_MIN_CLEAR_US; counts on each new block
+// debounced beam, as the sim: blocked at once, cleared after SENSOR_MIN_CLEAR_US of light; counted once the block has
+// lasted SENSOR_MIN_BLOCK_US (or when it then clears, for count-on-clear). Called every loop() pass.
 bool sensorBlocked(int k) {
+  if (!SENSOR_ON[k]) return false;
   bool raw = digitalRead(PIN_SENSOR[k]) == (SENSOR_ACTIVE_LOW ? LOW : HIGH);
   unsigned long now = micros();
-  if (raw == sensorState[k]) sensorEdgeUs[k] = now;
-  else if (now - sensorEdgeUs[k] >= (raw ? SENSOR_MIN_BLOCK_US : SENSOR_MIN_CLEAR_US)) { sensorState[k] = raw; if (raw) sensorCount[k]++; }
+  if (raw != sensorRaw[k]) {
+    sensorRaw[k] = raw;
+    if (raw) { if (sensorClearing[k]) sensorClearing[k] = false; else if (!sensorState[k]) { sensorState[k] = true; sensorOnUs[k] = now; } }
+    else if (sensorState[k]) { sensorClearing[k] = true; sensorOffUs[k] = now; }
+  }
+  if (sensorClearing[k] && now - sensorOffUs[k] >= SENSOR_MIN_CLEAR_US[k]) {
+    sensorClearing[k] = false; if (sensorArmed[k] && SENSOR_COUNT_ON_CLEAR[k]) sensorCount[k]++; sensorState[k] = false; sensorArmed[k] = false;
+  }
+  if (sensorState[k] && !sensorArmed[k] && now - sensorOnUs[k] >= SENSOR_MIN_BLOCK_US[k]) { sensorArmed[k] = true; if (!SENSOR_COUNT_ON_CLEAR[k]) sensorCount[k]++; }
   return sensorState[k];
+}
+
+void readCall() {   // debounced push button (counts presses) + 'd' from the host
+  bool raw = digitalRead(PIN_CALL) == LOW; unsigned long now = micros();
+  if (raw != callBtnRaw) { callBtnRaw = raw; callBtnUs = now; }
+  else if (raw != callBtn && now - callBtnUs >= CALL_DEBOUNCE_US) { callBtn = raw; if (raw) callPending++; }
+  while (Serial.available() > 0) if (Serial.read() == 'd') callPending++;
 }
 
 void setup() {
   Serial.begin(115200);
   for (int k = 0; k < 3; k++) pinMode(PIN_SENSOR[k], INPUT_PULLUP);
   pinMode(PIN_CALL, INPUT_PULLUP); pinMode(PIN_EN, OUTPUT); digitalWrite(PIN_EN, HIGH); pinMode(PIN_VIB, OUTPUT);
-  stepper.setMaxSpeed(60.0 / 60.0 * MOTOR_STEPS_PER_REV * GEAR_RATIO);
+  stepper.setMaxSpeed(fmaxf(MAX_RPM_X10, 600) / 600.0 * MOTOR_STEPS_PER_REV * GEAR_RATIO);
+#ifdef ESP32
+  gateServo.setPeriodHertz(50); safetyServo.setPeriodHertz(50);
+#endif
   gateServo.attach(PIN_GATE); safetyServo.attach(PIN_SAFETY);
   gateServo.write(GATE_CLOSED_DEG); safetyServo.write(SAFETY_CLOSED_DEG);
 }
 
 void runLogic() {
   outMotor = false; outRpm = 0; outDir = 1; outVib = 0; outGate = false; outSafety = false;   // safe state unless a block drives it
-${body.join('\n')}
-${chs.length ? '  for (int i = 0; i < SIG_N; i++) sig[i] = sigNext[i];' : ''}
+${hasCall ? '' : '  callPending = 0;   // no Dispense-button block reads the calls\n'}${body.join('\n')}
+${chs.length ? '  for (int i = 0; i < SIG_COUNT; i++) sig[i] = sigNext[i];' : ''}
 }
 
 void loop() {
-  static unsigned long last = 0;
+  static unsigned long last = micros();
   stepper.runSpeed();                                   // keep stepping between logic ticks
+  for (int k = 0; k < 3; k++) sensorBlocked(k);         // sensors and button are sampled every pass, not once per tick
+  readCall();
   unsigned long now = micros();
-  if (now - last < (unsigned long)(LOOP_MS * 1000)) return;
-  last += (unsigned long)(LOOP_MS * 1000);
-  bool b = digitalRead(PIN_CALL) == LOW; callPressed = b && !callBtnPrev; callBtnPrev = b;
-  if (Serial.available() && Serial.read() == 'd') callPressed = true;
+  if (now - last < LOOP_US) return;
+  last += LOOP_US;
+  if (now - last >= LOOP_US) last = now;                // fell behind (e.g. a long Serial print): drop the missed ticks, don't burst
   runLogic();
-  // motor: ramp toward the target belt rpm, then step at that speed
-  float target = outMotor ? outRpm * outDir : 0, maxStep = (RAMP_MS > 0 ? fmaxf(fabsf(target), fabsf(motorRpm)) * LOOP_MS / RAMP_MS : 1e9f);
-  motorRpm += constrain(target - motorRpm, -maxStep, maxStep);
+  // motor: ramp toward the target belt rpm like the sim (rate = the larger of target and current rpm, at least 1, per RAMP_MS)
+  float target = outMotor ? outRpm * outDir : 0;
+  if (RAMP_MS > 0) { float maxStep = fmaxf(fmaxf(outRpm, fabsf(motorRpm)), 1.0f) * LOOP_US / 1000.0f / RAMP_MS; motorRpm += constrain(target - motorRpm, -maxStep, maxStep); }
+  else motorRpm = target;
   digitalWrite(PIN_EN, motorRpm == 0 ? HIGH : LOW);
   stepper.setSpeed(motorRpm / 60.0 * MOTOR_STEPS_PER_REV * GEAR_RATIO);
   analogWrite(PIN_VIB, (int)(outVib * 255));
@@ -4111,28 +4255,51 @@ void loop() {
 `;
   }
   function exportJS() {
-    return `// FoamFeed custom logic "${G.name}" as a plain JavaScript tick function (same blocks and order as the editor).
-// Call tick(inputs, dt) every ${G.loop_ms} ms. inputs = { sensors: [{ blocked, count } x3], call: bool, t: seconds }.
-// Returns { motor, rpm, dir, vib, vibAmt, gate, safety }.
+    return `// FoamFeed custom logic "${cmt(G.name)}" — the block graph as data (GRAPH below), not a runnable controller.
+// To edit or simulate it: FoamFeed → Logic editor → ⇪ Import, and pick this file. For the board, export the Arduino sketch.
 const GRAPH = ${JSON.stringify(save(), null, 1)};
-// Load GRAPH into the FoamFeed logic editor (Import) to edit it again.
 `;
   }
-  const save = () => ({ format: 'foamfeed-logic', v: 1, name: G.name, loop_ms: G.loop_ms, nid: G.nid, nodes: G.nodes.map(n => ({ id: n.id, t: n.t, x: Math.round(n.x), y: Math.round(n.y), p: n.p })), links: G.links });
+  const save = () => ({ format: 'foamfeed-logic', v: 1, name: G.name, loop_ms: G.loop_ms, nid: G.nid, nodes: G.nodes.map(n => ({ id: n.id, t: n.t, x: Math.round(n.x), y: Math.round(n.y), p: Object.assign({}, n.p) })), links: G.links.map(l => ({ from: l.from.slice(), to: l.to.slice() })) });
+  const has = (o, k) => o != null && Object.prototype.hasOwnProperty.call(o, k);
+  const cleanText = (x, n) => String(x).replace(/[\r\n]+/g, ' ').slice(0, n);
+  function cleanP(t, src) {   // every setting coerced to its declared type (imported files are untrusted)
+    const p = pdef(t); src = src && typeof src === 'object' ? src : {};
+    for (const q of T[t].p) { if (!has(src, q.k)) continue; const v = src[q.k];
+      if (q.type === 'num') { const x = +v; if (Number.isFinite(x)) p[q.k] = Math.max(q.min, Math.min(q.max, x)); }
+      else if (q.type === 'sel') { const o = q.opts.find(([, val]) => String(val) === String(v)); if (o) p[q.k] = o[1]; }
+      else if (q.type === 'bool') p[q.k] = v === true || v === 'true' || v === 1;
+      else if (v != null && typeof v !== 'object') p[q.k] = cleanText(v, 60); }
+    return p;
+  }
   function load(o) {
-    if (!o || !Array.isArray(o.nodes)) throw new Error('not a FoamFeed logic file');
-    const nodes = o.nodes.filter(n => T[n.t]).map(n => ({ id: +n.id, t: n.t, x: +n.x || 0, y: +n.y || 0, p: Object.assign(pdef(n.t), n.p || {}) })), ids = new Set(nodes.map(n => n.id));
-    G = { name: o.name || 'Imported', loop_ms: +o.loop_ms || 1, nodes, links: (o.links || []).filter(l => ids.has(l.from[0]) && ids.has(l.to[0])), nid: Math.max(+o.nid || 1, ...nodes.map(n => n.id + 1), 1) };
+    if (!o || typeof o !== 'object' || !Array.isArray(o.nodes)) throw new Error('not a FoamFeed logic file');
+    const nodes = [], byId = new Map(), num = (x, d) => Number.isFinite(+x) ? Math.max(-1e5, Math.min(1e5, +x)) : d;
+    for (const n of o.nodes) { if (!n || typeof n.t !== 'string' || !has(T, n.t)) continue; const id = +n.id; if (!Number.isInteger(id) || id < 1 || id > 1e6 || byId.has(id)) continue;
+      const q = { id, t: n.t, x: num(n.x, 0), y: num(n.y, 0), p: cleanP(n.t, n.p) }; nodes.push(q); byId.set(id, q); }
+    const links = [], used = new Set();
+    for (const l of Array.isArray(o.links) ? o.links : []) { if (!l || !Array.isArray(l.from) || !Array.isArray(l.to)) continue; const a = byId.get(+l.from[0]), b = byId.get(+l.to[0]), ao = +l.from[1], bi = +l.to[1];
+      if (!a || !b || a === b || !Number.isInteger(ao) || !Number.isInteger(bi) || ao < 0 || bi < 0 || ao >= T[a.t].outs.length || bi >= T[b.t].ins.length || used.has(b.id + ':' + bi)) continue;
+      used.add(b.id + ':' + bi); links.push({ from: [a.id, ao], to: [b.id, bi] }); }
+    const lm = +o.loop_ms;
+    G = { name: o.name != null && typeof o.name !== 'object' ? cleanText(o.name, 80) || 'Imported' : 'Imported', loop_ms: Number.isFinite(lm) ? Math.max(0.1, Math.min(100, lm)) : 1, nodes, links,
+      nid: Math.max(Number.isInteger(+o.nid) && +o.nid <= 1e6 ? +o.nid : 1, ...nodes.map(n => n.id + 1), 1) };
+  }
+  function parseLogic(txt) {   // a .json logic file, or the JavaScript export (its GRAPH object)
+    try { return JSON.parse(txt); } catch (e) {}
+    const i = txt.indexOf('{', Math.max(0, txt.indexOf('GRAPH')));
+    for (let j = txt.lastIndexOf('}'); i >= 0 && j > i; j = txt.lastIndexOf('}', j - 1)) { try { return JSON.parse(txt.slice(i, j + 1)); } catch (e) {} }
+    throw new Error('no logic graph found in it');
   }
 
   // ---------------------------------------------------------------- attach to the sim
   let attachedFn = null;
-  function attach() {
+  function attach(keep) {   // keep === true: an edit of the running graph keeps the surviving blocks' memory
     const sim = window.__FF && __FF.sim; if (!sim || !sim.ctrl) return;
-    RT = compile(); attachedFn = RT.fn; sim.ctrl.logicFn = attachedFn; sim.ctrl.loop_ms = G.loop_ms; sim.ctrl.lT = null;
+    RT = compile(keep === true && RT ? RT : null); attachedFn = RT.fn; sim.ctrl.logicFn = attachedFn; sim.ctrl.loop_ms = G.loop_ms; sim.ctrl.lT = null;
   }
   function persist() { try { localStorage.setItem(KEY_CUR, JSON.stringify(save())); } catch (e) {} }
-  function changed(structural) { persist(); if (structural) { const sim = window.__FF && __FF.sim; if (sim && sim.ctrl && sim.ctrl.mode === 'logic') attach(); } if (UI.open) draw(); }
+  function changed(structural) { persist(); if (structural) { const sim = window.__FF && __FF.sim; if (sim && sim.ctrl && sim.ctrl.mode === 'logic') attach(true); } if (UI.open) draw(); }
 
   // ---------------------------------------------------------------- UI
   const css = `
@@ -4157,7 +4324,8 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
 #lgCv.pan{cursor:grabbing}
 #lgW{position:absolute;left:0;top:0;transform-origin:0 0}
 #lgSvg{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
-#lgSvg path{fill:none;stroke:#4a5668;stroke-width:2.5;pointer-events:stroke;cursor:pointer}
+#lgSvg path{fill:none;stroke:#4a5668;stroke-width:2.5;pointer-events:none}
+#lgSvg path.hit{stroke:transparent!important;stroke-width:16px!important;pointer-events:stroke;cursor:pointer}
 #lgSvg path.on{stroke:#ffcf4a}#lgSvg path.num{stroke:#5f8fd0}#lgSvg path.sel{stroke:#ff6b6b;stroke-width:4}#lgSvg path.tmp{stroke:#9fd0ff;stroke-dasharray:6 4;pointer-events:none}
 .lgN{position:absolute;min-width:150px;background:#1b212b;border:1px solid #333c4a;border-radius:8px;box-shadow:0 4px 14px #0007;user-select:none;-webkit-user-select:none}
 .lgN.sel{border-color:#7fb2ff;box-shadow:0 0 0 2px #7fb2ff55,0 4px 14px #0007}
@@ -4167,7 +4335,9 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
 .lgN .col{display:flex;flex-direction:column;gap:3px}
 .lgN .pt{display:flex;align-items:center;gap:5px;height:18px;font-size:11px;color:#aab4c4;white-space:nowrap}
 .lgN .pt.o{justify-content:flex-end}
-.lgN .dot{width:13px;height:13px;border-radius:50%;border:2px solid #6b7a90;background:#12151a;flex:0 0 13px;cursor:crosshair;touch-action:none}
+.lgN .dot{position:relative;width:13px;height:13px;border-radius:50%;border:2px solid #6b7a90;background:#12151a;flex:0 0 13px;cursor:crosshair;touch-action:none}
+.lgN .dot::after{content:'';position:absolute;inset:-6px}
+.lgN:focus-visible{outline:2px solid #7fb2ff;outline-offset:2px}
 .lgN .pt.i .dot{margin-left:-7px}.lgN .pt.o .dot{margin-right:-7px}
 .lgN .dot.n{border-radius:3px}.lgN .dot.on{background:#ffcf4a;border-color:#ffcf4a}.lgN .dot.pend{box-shadow:0 0 0 4px #7fb2ff88}
 .lgN .lv{color:#e8eefc;font-variant-numeric:tabular-nums;font-size:10.5px;min-width:24px;text-align:right}
@@ -4191,28 +4361,29 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
  #lgIns{position:absolute;left:0;right:0;bottom:0;z-index:3;width:auto;max-height:46vh;border-left:0;border-top:1px solid #38414f;box-shadow:0 -6px 18px #000a;display:none;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
  #lgIns.show{display:block}
  #lgFab{display:block;position:absolute;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:2;width:54px;height:54px;border-radius:50%;font-size:26px;background:#1f4f9c;border-color:#3b79d6;box-shadow:0 4px 14px #000a}
- .lgN .dot{width:18px;height:18px;flex-basis:18px}.lgN .pt{height:24px}
+ .lgN .dot{width:20px;height:20px;flex-basis:20px}.lgN .dot::after{inset:-9px}.lgN .pt{height:28px}
+ #lgWrap input,#lgWrap select,#lgWrap textarea,#lgDlg select,#lgDlg textarea{font-size:16px!important}
 }`;
   const UI = { open: false, sel: null, selLink: null, pan: [40, 30], z: 1, pend: null, hist: [], fut: [] };
   const el = (tag, attrs, html) => { const e = document.createElement(tag); if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (html != null) e.innerHTML = html; return e; };
-  const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   let wrap, cv, world, svg, pal, ins, stat;
   function buildUI() {
     document.head.appendChild(el('style', null, css));
     wrap = el('div', { id: 'lgWrap' }); document.body.appendChild(wrap);
-    wrap.innerHTML = `<div id="lgTop"><span class="ttl">🧩 Logic editor</span><button id="lgPalB" title="add a block">＋ Blocks</button>
-<input type="text" id="lgName" title="name of this logic"><button id="lgRun" title="run this logic as the machine's controller (Dispense control mode: Custom logic)">▶ Use on machine</button>
+    wrap.innerHTML = `<div id="lgTop"><span class="ttl">🧩 Logic editor</span><button id="lgPalB" title="add a block" aria-label="add a block">＋ Blocks</button>
+<input type="text" id="lgName" title="name of this logic" aria-label="name of this logic" maxlength="80"><button id="lgRun" title="run this logic as the machine's controller (Dispense control mode: Custom logic)">▶ Use on machine</button>
 <button id="lgCall" title="press the dispense button (the 'Dispense button' block pulses)">⏵ Dispense call</button>
-<label title="how often the controller loop runs (sim time)" style="color:#aab4c4">Loop <input type="number" id="lgLoop" min="0.1" max="100" step="0.1" style="width:56px;background:#12151a;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:3px 4px"> ms</label>
-<select id="lgTpl"><option value="">Start from…</option></select><button id="lgUndo" title="undo (Ctrl+Z)">↶</button><button id="lgRedo" title="redo (Ctrl+Y)">↷</button><button id="lgFit" title="fit the graph in view">⤢ Fit</button>
-<select id="lgLib" title="your saved logic (this browser)"><option value="">Saved logic…</option></select><button id="lgSave" title="save this logic under its name">💾 Save</button>
+<label title="how often the controller loop runs (sim time)" style="color:#aab4c4">Loop <input type="number" id="lgLoop" aria-label="controller loop period in ms" min="0.1" max="100" step="0.1" style="width:56px;background:#12151a;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:3px 4px"> ms</label>
+<select id="lgTpl" aria-label="start from a template"><option value="">Start from…</option></select><button id="lgUndo" title="undo (Ctrl+Z)" aria-label="undo">↶</button><button id="lgRedo" title="redo (Ctrl+Y)" aria-label="redo">↷</button><button id="lgFit" title="fit the graph in view">⤢ Fit</button>
+<select id="lgLib" title="your saved logic (this browser)" aria-label="saved logic"><option value="">Saved logic…</option></select><button id="lgSave" title="save this logic under its name">💾 Save</button>
 <button id="lgImp" title="load a .json logic file">⇪ Import</button><button id="lgExp" class="pri" title="export the finished logic as an Arduino sketch, JavaScript or JSON">⇩ Export code</button>
 <span class="sp"></span><button id="lgClose" title="back to the simulator (the logic keeps running)">✕ Close</button></div>
-<div id="lgStat"></div><div id="lgMain"><div id="lgPal"></div><div id="lgCv"><div id="lgW"><svg id="lgSvg"></svg></div><button id="lgFab" title="add a block">＋</button></div><div id="lgIns"></div></div>`;
-    document.body.appendChild(el('div', { id: 'lgDlg' }, `<div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="color:#7fb2ff">Export</b><select id="lgFmt" style="width:auto"><option value="cpp">Arduino C++ sketch (.ino)</option><option value="json">Logic file (.json, re-importable)</option><option value="js">JavaScript (graph)</option></select><span style="flex:1"></span><button id="lgCopy">⧉ Copy</button><button id="lgDl" class="pri">⇩ Download</button><button id="lgDlgX">✕</button></div><textarea id="lgCode" spellcheck="false" readonly></textarea><small class="note">The sketch reproduces the graph block for block. Set your pins and the servo angles at the top before uploading.</small></div>`));
+<div id="lgStat"></div><div id="lgMain"><div id="lgPal"></div><div id="lgCv"><div id="lgW"><svg id="lgSvg"></svg></div><button id="lgFab" title="add a block" aria-label="add a block">＋</button></div><div id="lgIns"></div></div>`;
+    document.body.appendChild(el('div', { id: 'lgDlg' }, `<div role="dialog" aria-modal="true" aria-label="Export code"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="color:#7fb2ff">Export</b><select id="lgFmt" style="width:auto" aria-label="export format"><option value="cpp">Arduino C++ sketch (.ino)</option><option value="json">Logic file (.json, re-importable)</option><option value="js">JavaScript (graph data, re-importable)</option></select><span style="flex:1"></span><button id="lgCopy">⧉ Copy</button><button id="lgDl" class="pri">⇩ Download</button><button id="lgDlgX" title="close" aria-label="close the export dialog">✕</button></div><textarea id="lgCode" spellcheck="false" readonly></textarea><small class="note">The sketch reproduces the graph block for block. Set your pins and the servo angles at the top before uploading.</small></div>`));
     cv = wrap.querySelector('#lgCv'); world = wrap.querySelector('#lgW'); svg = wrap.querySelector('#lgSvg'); pal = wrap.querySelector('#lgPal'); ins = wrap.querySelector('#lgIns'); stat = wrap.querySelector('#lgStat');
     // palette
-    let ph = '<input type="search" id="lgFind" placeholder="Find a block…">';
+    let ph = '<input type="search" id="lgFind" placeholder="Find a block…" aria-label="find a block">';
     for (const [ck, [cn, col]] of Object.entries(CATS)) { ph += `<h4><i style="background:${col}"></i>${cn}</h4>`; for (const [t, ty] of Object.entries(T)) if (ty.cat === ck) ph += `<button data-t="${t}" style="border-left-color:${col}" title="${esc(ty.help)}">${esc(ty.label)}</button>`; }
     pal.innerHTML = ph;
     pal.addEventListener('click', e => { const b = e.target.closest('button[data-t]'); if (!b) return; addNode(b.dataset.t); if (matchMedia('(max-width:820px)').matches) pal.classList.remove('show'); });
@@ -4220,41 +4391,42 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
     const $w = id => document.getElementById(id);
     $w('lgPalB').onclick = $w('lgFab').onclick = () => pal.classList.toggle('show');
     $w('lgClose').onclick = () => close();
-    $w('lgName').oninput = e => { G.name = e.target.value; persist(); };
+    $w('lgName').oninput = e => { G.name = cleanText(e.target.value, 80); persist(); };
     $w('lgLoop').onchange = e => { snap(); G.loop_ms = Math.max(0.1, Math.min(100, +e.target.value || 1)); e.target.value = G.loop_ms; changed(true); };
     $w('lgRun').onclick = () => { const c = __FF.ctS(); if (c.mode === 'logic') { c.mode = 'feed'; } else { c.mode = 'logic'; } __FF.applyCtrl(); __FF.syncCtrlUI(); if (c.mode === 'logic') attach(); topUI(); };
     $w('lgCall').onclick = () => { const c = __FF.ctS(); if (c.mode !== 'logic') { c.mode = 'logic'; __FF.applyCtrl(); __FF.syncCtrlUI(); attach(); } __FF.feedReq(1); topUI(); };
     const tpl = TEMPLATES(); $w('lgTpl').innerHTML += Object.keys(tpl).map(k => `<option>${esc(k)}</option>`).join('');
     $w('lgTpl').onchange = e => { const k = e.target.value; e.target.value = ''; if (!tpl[k]) return; if (G.nodes.length && !confirm('Replace the current graph with "' + k + '"? (Undo can bring it back.)')) return; snap(); tpl[k](); UI.sel = null; changed(true); fit(); topUI(); };
     $w('lgUndo').onclick = undo; $w('lgRedo').onclick = redo; $w('lgFit').onclick = fit;
-    $w('lgSave').onclick = () => { const lib = libGet(), nm = (prompt('Save this logic as:', G.name) || '').trim(); if (!nm) return; G.name = nm; lib[nm] = save(); libSet(lib); topUI(); };
-    $w('lgLib').onchange = e => { const nm = e.target.value; e.target.value = ''; if (!nm) return; const lib = libGet();
-      if (nm.startsWith('✕ ')) { const k = nm.slice(2); if (confirm(`Delete saved logic "${k}"?`)) { delete lib[k]; libSet(lib); topUI(); } return; }
-      if (!lib[nm]) return; snap(); load(lib[nm]); UI.sel = null; changed(true); fit(); topUI(); };
-    $w('lgImp').onclick = () => { const i = el('input', { type: 'file', accept: '.json,application/json' }); i.onchange = async () => { const fl = i.files[0]; if (!fl) return; try { const o = JSON.parse(await fl.text()); snap(); load(o.nodes ? o : o.GRAPH || o); UI.sel = null; changed(true); fit(); topUI(); } catch (err) { alert('Could not read that file: ' + err.message); } }; i.click(); };
+    $w('lgSave').onclick = () => { const lib = libGet(), nm = cleanText(prompt('Save this logic as:', G.name) || '', 80).trim(); if (!nm) return; G.name = nm; lib[nm] = save(); libSet(lib); topUI(); };
+    $w('lgLib').onchange = e => { const v = e.target.value; e.target.value = ''; const op = v.slice(0, 2), nm = v.slice(2); if (op !== 'L:' && op !== 'D:') return; const lib = libGet();
+      if (op === 'D:') { if (has(lib, nm) && confirm(`Delete saved logic "${nm}"?`)) { delete lib[nm]; libSet(lib); topUI(); } return; }
+      if (!has(lib, nm)) return; try { const before = JSON.stringify(save()); load(lib[nm]); UI.hist.push(before); UI.fut.length = 0; } catch (err) { alert('Could not load it: ' + err.message); return; } UI.sel = null; changed(true); fit(); topUI(); };
+    $w('lgImp').onclick = () => { const i = el('input', { type: 'file', accept: '.json,.js,application/json,text/javascript' }); i.onchange = async () => { const fl = i.files[0]; if (!fl) return; try { const o = parseLogic(await fl.text()), before = JSON.stringify(save()); load(o && !o.nodes && o.GRAPH ? o.GRAPH : o); UI.hist.push(before); UI.fut.length = 0; UI.sel = null; changed(true); fit(); topUI(); } catch (err) { alert('Could not read that file: ' + err.message); } }; i.click(); };
     const dlg = document.getElementById('lgDlg'), fmt = document.getElementById('lgFmt'), code = document.getElementById('lgCode');
     const gen = () => { code.value = fmt.value === 'cpp' ? exportCpp() : fmt.value === 'js' ? exportJS() : JSON.stringify(save(), null, 1); };
-    $w('lgExp').onclick = () => { gen(); dlg.classList.add('open'); }; fmt.onchange = gen; $w('lgDlgX').onclick = () => dlg.classList.remove('open');
+    $w('lgExp').onclick = () => { gen(); dlg.classList.add('open'); $w('lgDlgX').focus(); }; fmt.onchange = gen; $w('lgDlgX').onclick = () => dlg.classList.remove('open');
     dlg.addEventListener('click', e => { if (e.target === dlg) dlg.classList.remove('open'); });
     $w('lgCopy').onclick = async () => { try { await navigator.clipboard.writeText(code.value); $w('lgCopy').textContent = '✓ Copied'; } catch (e) { code.select(); document.execCommand('copy'); } setTimeout(() => $w('lgCopy').textContent = '⧉ Copy', 1200); };
     $w('lgDl').onclick = () => { const ext = { cpp: 'ino', json: 'json', js: 'js' }[fmt.value], nm = (G.name || 'logic').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'logic';
       const a = el('a', { download: nm + '.' + ext, href: URL.createObjectURL(new Blob([code.value], { type: 'text/plain' })) }); document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); };
     canvasEvents();
-    document.addEventListener('keydown', e => { if (!UI.open || /INPUT|TEXTAREA|SELECT/.test(document.activeElement && document.activeElement.tagName)) return;
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && dlg.classList.contains('open')) { e.preventDefault(); dlg.classList.remove('open'); $w('lgExp').focus(); return; }
+      if (!UI.open || /INPUT|TEXTAREA|SELECT/.test(document.activeElement && document.activeElement.tagName)) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && (UI.sel || UI.selLink)) { e.preventDefault(); delSel(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && UI.sel) { e.preventDefault(); dup(); }
       else if (e.key === 'Escape') { UI.pend = null; UI.sel = null; UI.selLink = null; draw(); } });
   }
-  const libGet = () => { try { return JSON.parse(localStorage.getItem(KEY_LIB) || '{}') || {}; } catch (e) { return {}; } };
+  const libGet = () => { const o = Object.create(null); try { const j = JSON.parse(localStorage.getItem(KEY_LIB) || '{}'); if (j && typeof j === 'object') for (const k of Object.keys(j)) o[k] = j[k]; } catch (e) {} return o; };
   const libSet = o => { try { localStorage.setItem(KEY_LIB, JSON.stringify(o)); } catch (e) { alert('Could not save (browser storage full or blocked).'); } };
   function topUI() {
     const c = window.__FF && __FF.ctS ? __FF.ctS() : {}, on = c.mode === 'logic', r = document.getElementById('lgRun');
     r.classList.toggle('on', on); r.textContent = on ? '■ Running on machine — stop' : '▶ Use on machine';
     document.getElementById('lgName').value = G.name; document.getElementById('lgLoop').value = G.loop_ms;
     const lib = libGet(), ks = Object.keys(lib);
-    document.getElementById('lgLib').innerHTML = '<option value="">Saved logic…</option>' + ks.map(k => `<option>${esc(k)}</option>`).join('') + (ks.length ? '<option disabled>──────────</option>' + ks.map(k => `<option value="✕ ${esc(k)}">✕ delete “${esc(k)}”</option>`).join('') : '');
+    document.getElementById('lgLib').innerHTML = '<option value="">Saved logic…</option>' + ks.map(k => `<option value="L:${esc(k)}">${esc(k)}</option>`).join('') + (ks.length ? '<option disabled>──────────</option>' + ks.map(k => `<option value="D:${esc(k)}">✕ delete “${esc(k)}”</option>`).join('') : '');
   }
   function snap() { UI.hist.push(JSON.stringify(save())); if (UI.hist.length > 80) UI.hist.shift(); UI.fut.length = 0; }
   function undo() { if (!UI.hist.length) return; UI.fut.push(JSON.stringify(save())); load(JSON.parse(UI.hist.pop())); UI.sel = null; changed(true); topUI(); }
@@ -4272,15 +4444,21 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const n of G.nodes) { const d = world.querySelector(`.lgN[data-id="${n.id}"]`), w = d ? d.offsetWidth : 160, h = d ? d.offsetHeight : 90; x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + w); y1 = Math.max(y1, n.y + h); }
     const r = cv.getBoundingClientRect(), z = Math.max(0.3, Math.min(1.2, Math.min((r.width - 60) / (x1 - x0), (r.height - 60) / (y1 - y0)))); UI.z = z; UI.pan = [(r.width - (x1 - x0) * z) / 2 - x0 * z, (r.height - (y1 - y0) * z) / 2 - y0 * z]; applyView(); wires(); }
   const fmtV = v => typeof v === 'boolean' ? (v ? 'ON' : 'off') : Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : (+v).toFixed(2);
+  function selNode(id) {   // keyboard focus on a block selects it (no redraw, so focus stays)
+    if (UI.sel === id) return; UI.sel = id; UI.selLink = null; for (const d of world.querySelectorAll('.lgN')) d.classList.toggle('sel', +d.dataset.id === id); showIns();
+  }
   function draw() {
+    const ae = document.activeElement, refocus = ae && ae.classList && ae.classList.contains('lgN');
     for (const d of world.querySelectorAll('.lgN')) d.remove();
-    for (const n of G.nodes) { const ty = T[n.t], col = CATS[ty.cat][1], d = el('div', { class: 'lgN' + (UI.sel === n.id ? ' sel' : '') + (ACTIONS.has(n.t) ? ' act' : ''), 'data-id': n.id });
+    for (const n of G.nodes) { const ty = T[n.t], col = CATS[ty.cat][1], d = el('div', { class: 'lgN' + (UI.sel === n.id ? ' sel' : '') + (ACTIONS.has(n.t) ? ' act' : ''), 'data-id': n.id, tabindex: '0', role: 'group', 'aria-label': `${ty.label} block #${n.id}${ty.sub ? ', ' + ty.sub(n.p) : ''}` });
+      d.addEventListener('focus', () => selNode(n.id));
       d.style.cssText = `left:${n.x}px;top:${n.y}px;--c:${col}`;
       let h = `<div class="hd"><b>${esc(ty.label)}</b><small>${ty.sub ? esc(ty.sub(n.p)) : ''}</small></div>`;
       if (n.t === 'watch') h += '<div class="big" data-w="1">—</div>';
-      h += '<div class="bd"><div class="col">' + ty.ins.map((p, ii) => { const l = linkTo(n.id, ii), dv = !l && p[2] && p[2] !== 't' ? ` <span style="color:#6c7a90">${esc(n.p[p[2]])}</span>` : ''; return `<div class="pt i"><span class="dot ${p[1] === NN ? 'n' : ''}" data-k="i" data-n="${n.id}" data-p="${ii}"></span>${esc(p[0])}${dv}</div>`; }).join('') + '</div>';
+      h += '<div class="bd"><div class="col">' + ty.ins.map((p, ii) => { const l = linkTo(n.id, ii), dv = !l && p[2] && p[2] !== 't' ? ` <span style="color:#8c98ab">${esc(n.p[p[2]])}</span>` : ''; return `<div class="pt i"><span class="dot ${p[1] === NN ? 'n' : ''}" data-k="i" data-n="${n.id}" data-p="${ii}"></span>${esc(p[0])}${dv}</div>`; }).join('') + '</div>';
       h += '<div class="col">' + ty.outs.map((p, oi) => `<div class="pt o"><span class="lv" data-v="${oi}"></span>${esc(p[0])}<span class="dot ${p[1] === NN ? 'n' : ''}" data-k="o" data-n="${n.id}" data-p="${oi}"></span></div>`).join('') + '</div></div>';
       d.innerHTML = h; world.appendChild(d); }
+    if (refocus && UI.sel != null) { const f = world.querySelector(`.lgN[data-id="${UI.sel}"]`); if (f) f.focus({ preventScroll: true }); }
     if (UI.pend) { const dd = world.querySelector(`.dot[data-k="${UI.pend.k}"][data-n="${UI.pend.n}"][data-p="${UI.pend.p}"]`); if (dd) dd.classList.add('pend'); }
     applyView(); wires(); live();
   }
@@ -4289,7 +4467,7 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
   const curve = (a, b) => { const dx = Math.max(40, Math.abs(b[0] - a[0]) * 0.5); return `M${a[0]},${a[1]} C${a[0] + dx},${a[1]} ${b[0] - dx},${b[1]} ${b[0]},${b[1]}`; };
   function wires() {
     let h = ''; G.links.forEach((l, i) => { const a = portXY('o', l.from[0], l.from[1]), b = portXY('i', l.to[0], l.to[1]); if (!a || !b) return; const src = G.nodes.find(n => n.id === l.from[0]), num = src && T[src.t].outs[l.from[1]] && T[src.t].outs[l.from[1]][1] === NN;
-      h += `<path data-l="${i}" class="${num ? 'num' : ''}${UI.selLink === l ? ' sel' : ''}" d="${curve(a, b)}"/>`; });
+      const d = curve(a, b); h += `<path data-l="${i}" class="${num ? 'num' : ''}${UI.selLink === l ? ' sel' : ''}" d="${d}"/><path class="hit" data-l="${i}" d="${d}"/>`; });   // wide invisible path = finger-sized hit area
     if (UI.drag && UI.drag.wire) h += `<path class="tmp" d="${curve(UI.drag.a, UI.drag.b)}"/>`;
     svg.innerHTML = h;
   }
@@ -4299,7 +4477,7 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
       for (const s of d.querySelectorAll('.lv')) { const x = v ? v[+s.dataset.v] : null; s.textContent = x == null ? '' : fmtV(x); }
       for (const s of d.querySelectorAll('.dot[data-k="o"]')) s.classList.toggle('on', !!(v && v[+s.dataset.p] === true));
       if (n.t === 'watch') { const st = running ? R.state.get(n.id) : null, w = d.querySelector('[data-w]'); if (w) w.textContent = st && st.v != null ? fmtV(st.v) : '—'; } }
-    for (const p of svg.querySelectorAll('path[data-l]')) { const l = G.links[+p.dataset.l], v = running && l ? R.vals.get(l.from[0]) : null, x = v ? v[l.from[1]] : null; p.classList.toggle('on', x === true || (typeof x === 'number' && x !== 0 && !p.classList.contains('num'))); }
+    for (const p of svg.querySelectorAll('path[data-l]:not(.hit)')) { const l = G.links[+p.dataset.l], v = running && l ? R.vals.get(l.from[0]) : null, x = v ? v[l.from[1]] : null; p.classList.toggle('on', x === true || (typeof x === 'number' && x !== 0 && !p.classList.contains('num'))); }
     const L = C && C.L, g = sim && sim.gate, sf = sim && sim.safety;
     stat.innerHTML = running ? `<b>Running on the machine</b> · loop ${G.loop_ms} ms · t ${sim.t.toFixed(2)} s · motor <b>${L && L.motor ? (L.dir < 0 ? '◀ ' : '') + (+L.rpm).toFixed(1) + ' rpm' : 'off'}</b> (belt ${(+sim.P.rpm).toFixed(1)}) · vibrator <b>${L && L.vib ? Math.round((L.vibAmt ?? 1) * 100) + '%' : 'off'}</b> · gate <b>${L && L.gate ? 'open' : 'closed'}</b>${g ? ' (' + (g.off * 1e3).toFixed(1) + ' mm)' : ''} · safety <b>${L && L.safety ? 'open' : 'closed'}</b>${sf ? ' (' + (sf.off * 1e3).toFixed(1) + ' mm)' : ''} · S1/S2/S3 <b>${C.sensors.map(x => x.count).join(' / ')}</b> · out <b>${sim.stats.dispensed}</b>${C.logicErr ? ` · <span class="e">error: ${esc(C.logicErr)}</span>` : ''}${C.Lcall ? ` · ${C.Lcall} call(s) waiting` : ''}`
       : `Editing — not driving the machine. Press <b>▶ Use on machine</b> to run this logic as the controller (live values then show on every port). ${G.nodes.length} blocks, ${G.links.length} wires.`;
@@ -4312,19 +4490,23 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
 <p><b style="color:#ffcf4a">Yellow</b> wires are on/true; blue wires carry numbers. Drag the background to pan, scroll or pinch to zoom. Select a wire and press Delete (or the button below) to remove it; drag a connected input away to re-route it.</p>
 <p>Unconnected inputs use the block's own setting. Actions you don't use stay off (safe state).</p>${UI.selLink ? '<div class="btns"><button id="lgDelL">✕ Delete selected wire</button></div>' : ''}<h3 style="margin-top:12px">Log</h3><div id="lgLog"></div>`;
       const b = document.getElementById('lgDelL'); if (b) b.onclick = delSel; if (UI.selLink) ins.classList.add('show'); live(); return; }
-    const ty = T[n.t]; let h = `<h3>${esc(ty.label)} <small style="color:#6c7a90">#${n.id}</small></h3><p>${esc(ty.help)}</p>`;
-    for (const q of ty.p) { const v = n.p[q.k];
-      if (q.type === 'num') h += `<div class="r"><label>${esc(q.l)}${q.unit ? ' (' + q.unit + ')' : ''}</label><input type="range" data-k="${q.k}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}"><input type="number" data-k="${q.k}" step="${q.step}" value="${v}"></div>`;
-      else if (q.type === 'sel') h += `<div class="r"><label>${esc(q.l)}</label><select data-k="${q.k}" style="grid-column:2/4">${q.opts.map(([lab, val]) => `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(lab)}</option>`).join('')}</select></div>`;
-      else if (q.type === 'bool') h += `<div class="r"><label>${esc(q.l)}</label><input type="checkbox" data-k="${q.k}"${v ? ' checked' : ''} style="justify-self:start;width:22px;height:22px"></div>`;
-      else h += `<div class="r"><label>${esc(q.l)}</label><input type="text" data-k="${q.k}" value="${esc(v)}" style="grid-column:2/4"></div>`; }
+    const ty = T[n.t]; let h = `<h3>${esc(ty.label)} <small style="color:#8c98ab">#${esc(n.id)}</small></h3><p>${esc(ty.help)}</p>`;
+    for (const q of ty.p) { const v = n.p[q.k], id = 'lgP_' + q.k, lab = esc(q.l + (q.unit ? ' (' + q.unit + ')' : ''));
+      if (q.type === 'num') h += `<div class="r"><label for="${id}">${lab}</label><input type="range" data-k="${esc(q.k)}" aria-label="${lab} slider" min="${esc(q.min)}" max="${esc(q.max)}" step="${esc(q.step)}" value="${esc(v)}"><input type="number" id="${id}" data-k="${esc(q.k)}" min="${esc(q.min)}" max="${esc(q.max)}" step="${esc(q.step)}" value="${esc(v)}"></div>`;
+      else if (q.type === 'sel') h += `<div class="r"><label for="${id}">${lab}</label><select id="${id}" data-k="${esc(q.k)}" style="grid-column:2/4">${q.opts.map(([l, val]) => `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
+      else if (q.type === 'bool') h += `<div class="r"><label for="${id}">${lab}</label><input type="checkbox" id="${id}" data-k="${esc(q.k)}"${v ? ' checked' : ''} style="justify-self:start;width:22px;height:22px"></div>`;
+      else h += `<div class="r"><label for="${id}">${lab}</label><input type="text" id="${id}" data-k="${esc(q.k)}" value="${esc(v)}" maxlength="60" style="grid-column:2/4"></div>`; }
     h += `<div class="lv"></div><div class="btns"><button id="lgDup">⧉ Duplicate</button><button id="lgDel">✕ Delete block</button><button id="lgDone" style="display:none">Done</button></div>`;
     ins.innerHTML = h; ins.classList.add('show');
     if (matchMedia('(max-width:820px)').matches) document.getElementById('lgDone').style.display = '';
-    const setP = (k, raw) => { const q = ty.p.find(x => x.k === k); let v = raw; if (q.type === 'num') { v = +raw; if (!isFinite(v)) return; } else if (q.type === 'sel') v = typeof q.def === 'number' ? +raw : raw; else if (q.type === 'bool') v = !!raw;
+    const setP = (k, raw) => { const q = ty.p.find(x => x.k === k); let v = raw; if (q.type === 'num') { v = +raw; if (raw === '' || !isFinite(v)) return; v = Math.max(q.min, Math.min(q.max, v)); } else if (q.type === 'sel') v = typeof q.def === 'number' ? +raw : raw; else if (q.type === 'bool') v = !!raw; else v = cleanText(raw, 60);
       n.p[k] = v; for (const e of ins.querySelectorAll(`[data-k="${k}"]`)) if (e.type !== 'checkbox' && e !== document.activeElement) e.value = v;
       const d = world.querySelector(`.lgN[data-id="${n.id}"] .hd small`); if (d && ty.sub) d.textContent = ty.sub(n.p); persist(); if (q.type !== 'num' || k !== 'v') draw(); };
-    for (const e of ins.querySelectorAll('[data-k]')) { e.addEventListener('pointerdown', () => snap(), { once: true }); e.addEventListener(e.type === 'checkbox' || e.tagName === 'SELECT' ? 'change' : 'input', () => setP(e.dataset.k, e.type === 'checkbox' ? e.checked : e.value)); }
+    // undo: one step per edit — armed on focus and after each committed change, taken at the first input of the edit
+    for (const e of ins.querySelectorAll('[data-k]')) { let armed = true; const once = () => { if (armed) { snap(); armed = false; } };
+      e.addEventListener('focus', () => { armed = true; });
+      if (e.type === 'checkbox' || e.tagName === 'SELECT') e.addEventListener('change', () => { snap(); setP(e.dataset.k, e.type === 'checkbox' ? e.checked : e.value); });
+      else { e.addEventListener('input', () => { once(); setP(e.dataset.k, e.value); }); e.addEventListener('change', () => { armed = true; }); } }
     document.getElementById('lgDup').onclick = dup; document.getElementById('lgDel').onclick = delSel; document.getElementById('lgDone').onclick = () => { UI.sel = null; draw(); showIns(); };
     live();
   }
@@ -4382,7 +4564,7 @@ const GRAPH = ${JSON.stringify(save(), null, 1)};
     if (UI.open) { live(); if (wrap) { const on = c && c.mode === 'logic', r = document.getElementById('lgRun'); if (r && r.classList.contains('on') !== !!on) topUI(); } } }, 120);
   // start: last graph from this browser, else the one-pill template
   try { const o = JSON.parse(localStorage.getItem(KEY_CUR) || 'null'); if (o) load(o); else TEMPLATES()['One pill per call (S2 stops it)'](); } catch (e) { TEMPLATES()['One pill per call (S2 stops it)'](); }
-  window.FFLogic = { open, close, attach, compile: () => compile(), exportCpp, exportJS, save, load: o => { load(o); changed(true); }, get graph() { return G; }, TYPES: T, templates: TEMPLATES };
+  window.FFLogic = { open, close, attach, compile: () => compile(), exportCpp, exportJS, save, load: o => { load(o); UI.hist.length = 0; UI.fut.length = 0; RT = null; changed(true); } /* a new dispenser's graph: no undo into the old one, fresh block memory */, get graph() { return G; }, TYPES: T, templates: TEMPLATES };
   const btn = document.getElementById('btnLogic'); if (btn) btn.onclick = open;
   attach();
 })();
