@@ -146,7 +146,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 <div class="row"><label for="bkCount" title="pills in a full load">Pills per load</label><input type="number" id="bkCount" min="1" max="150" style="width:70px"></div>
 <div class="btns"><button id="bkRefill" title="refill this dispenser with a full load">⟳ Refill this dispenser</button></div>
 <h2>Sensors &amp; feed control</h2>
-<div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="feed">Dispense on demand (counts pills, stops)</option><option value="continuous">Run nonstop (no counting)</option></select></div>
+<div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="feed">Dispense on demand (counts pills, stops)</option><option value="continuous">Run nonstop (no counting)</option><option value="logic">Custom logic (node editor)</option></select></div>
+<div class="btns"><button id="btnLogic" title="build your own controller from logic blocks: sensors, conditions, timers, signals and actions">🧩 Logic editor…</button></div>
 <div class="row" style="display:none"><label for="ctN" title="how many pills one press of Dispense delivers">How many pills</label><span style="grid-column:2/4;display:flex;gap:6px;align-items:center"><button id="ctNm" title="one fewer" style="width:34px">−</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:56px;text-align:center"><button id="ctNp" title="one more" style="width:34px">+</button></span></div>
 <div class="btns" style="display:none"><button id="btnFeed" class="pri" style="flex:2" title="open the gate, run the conveyor (and vibrator) until the exit sensor has counted the number of pills set above, then stop">▶ Dispense 1 pill</button><button id="btnFeedN" style="display:none"></button><button id="btnFeedStop">■ Stop</button></div>
 <div id="rejBox" style="display:none;border:1px solid #f66;background:#3a1416;color:#ffd6d6;border-radius:6px;padding:6px 8px;margin:4px 0"><b style="color:#ff8080">⛔ LOT REJECTED — signal sent to host</b><div id="rejWhy" style="font-size:12px;margin:3px 0"></div><button id="btnRejClr" title="acknowledge: the lot has been pulled. Dump new load also clears it">Acknowledge · new lot</button></div>
@@ -255,6 +256,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 <details><summary>Cam file conventions</summary><small>2-D files (DXF / CSV): origin = cam shaft centre, units mm, +X points across the nip toward the other belt, +Y points up the incline toward the hopper; drawn as it sits at the start of a run. The belt wraps the cam taut, so only the outer (convex) envelope matters. The same profile drives both cams (cam B is the mirror image, as in the CAD). STL/OBJ cams are recognised either in assembly coordinates (sitting on cam A or B) or as a lone part with the shaft on its Z axis.</small></details>
 <h2>Pills</h2>
 <select id="pillPreset"></select>
+<div class="btns"><button id="pillSave" title="save every setting of the current pill (shape, size, material, friction, tack, safety-gate throw…) as a named pill you can pick from the list above and in the dispenser bank">★ Save this pill</button><button id="pillDel" title="remove one of your saved pills">✕ Remove saved…</button></div>
 <div class="row"><label>Shape</label><select id="shape" style="grid-column:2/4"></select></div>
 <div class="row"><label id="pWlab">Diameter (mm)</label><input type="range" id="pW" min="3" max="20" step="0.5"><span class="v"><span id="pWV"></span></span></div>
 <div class="row" id="rowL"><label>Length (mm)</label><input type="range" id="pL" min="6" max="30" step="0.5"><span class="v"><span id="pLV"></span></span></div>
@@ -1554,6 +1556,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       }
       if (sn.blk && !sn.armed && now - sn.tOn >= sn.min_block_ms * 1e-3 - 1e-12) { sn.armed = true; if (sn.count_on !== 'clear') pillEvent(sim, C, k); }
     }
+    if (C.mode === 'logic') { logicApply(sim, C, dt); return; }
     if (C.mode !== 'feed') return;
     if (C.reject) C.queue = 0;
     if (C.p1q.length) { const sn1 = C.sensors.find(x => x.zone === 'probe'), lim = Math.min(sim.Lc, ((sn1 && sn1.up_mm) ?? 22) * 1e-3) + 0.02, sg = C.rpmRun < 0 ? -1 : 1;   // ledger: drop pills that must have left long ago (slipped out unseen)
@@ -1631,6 +1634,22 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     // shake a second pill in behind them (S1 off: vibrator follows the motor as before)
     if (C.vib_s1 && C.mode === 'feed' && C.sensors.some(x => x.on && x.zone === 'probe')) vt = C.state === 'feeding' && C.cur && C.p1q.length < Math.max(1, (C.cur.need || 1) - C.cur.n) ? 1 : 0;
     const ve = sim.vibEnv == null ? 1 : sim.vibEnv, kv = dt * ((P.vib && P.vib.freq) || 40);   // speaker switched with the motor-enable line; amplitude rises / dies over ~1 cycle
+    sim.vibEnv = ve + Math.max(-kv, Math.min(kv, vt - ve));
+  }
+  /* Custom logic mode: a user-built node graph (compiled by the app's logic editor into C.logicFn) runs as the controller
+     loop every C.loop_ms of sim time, reading the debounced sensors and writing C.L = { motor, rpm, dir, vib, vibAmt,
+     gate, safety }. The outputs then drive the same hardware models as the built-in controller: motor ramp (ramp_ms),
+     servo gate (servo speed + linkage), safety gate (its speed), vibrator envelope. */
+  function logicApply(sim, C, dt) {
+    const P = sim.P; if (!C.L) C.L = { motor: false, rpm: 0, dir: 1, vib: false, vibAmt: 1, gate: false, safety: false };
+    const per = Math.max(1e-4, (C.loop_ms ?? 1) * 1e-3);
+    if (typeof C.logicFn === 'function' && (C.lT == null || sim.t - C.lT >= per - 1e-12)) { const ldt = C.lT == null ? per : sim.t - C.lT; C.lT = sim.t;
+      try { C.logicFn(sim, C, ldt); C.logicErr = null; } catch (e) { C.logicErr = String(e && e.message || e); } }
+    const L = C.L, tgt = L.motor ? Math.abs(+L.rpm || 0) * (L.dir < 0 ? -1 : 1) : 0, rate = Math.max(Math.abs(+L.rpm || 0), Math.abs(C.mRpm), 1) / Math.max(C.ramp_ms * 1e-3, 1e-9);
+    if (C.ramp_ms > 0) { const dr = rate * dt; C.mRpm += Math.max(-dr, Math.min(dr, tgt - C.mRpm)); if (Math.abs(C.mRpm) < 1e-9) C.mRpm = 0; } else C.mRpm = tgt;
+    P.rpm = C.mRpm;
+    if (sim.gate) sim.gate.open = !!L.gate;
+    const vt = L.vib ? Math.max(0, Math.min(1, L.vibAmt == null ? 1 : +L.vibAmt)) : 0, ve = sim.vibEnv == null ? 1 : sim.vibEnv, kv = dt * ((P.vib && P.vib.freq) || 40);
     sim.vibEnv = ve + Math.max(-kv, Math.min(kv, vt - ve));
   }
   function feedStats(sim) {
@@ -1815,7 +1834,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function safetyStep(sim, dt) {
     const s = sim.safety, C = sim.ctrl; let open = true;
     // feed mode: spring-closed except while a called dose is still on its way out; continuous (or no controller): held open
-    if (C && C.mode === 'feed' && C.safety_on !== false) open = (C.state === 'feeding' || C.state === 'stopping' || C.state === 'release') && !!C.cur && C.cur.n < (C.cur.need || 1);
+    if (C && C.mode === 'logic') open = !!(C.L && C.L.safety);
+    else if (C && C.mode === 'feed' && C.safety_on !== false) open = (C.state === 'feeding' || C.state === 'stopping' || C.state === 'release') && !!C.cur && C.cur.n < (C.cur.need || 1);
     const tgt = open ? s.push : 0, r = s.speed * dt, prev = s.off; s.off = prev + Math.max(-r, Math.min(r, tgt - prev)); s.vel = (s.off - prev) / dt; s.open = open;
   }
   function gateStep(sim, dt) {
@@ -1930,7 +1950,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function restCheck(sim) {
     const P = sim.P, B = sim.bodies, R = sim.rest || (sim.rest = { still: 0, asleep: false, n: -1 }), C = sim.ctrl;
     let alive = 0; for (let i = 0; i < B.n; i++) if (B.alive[i]) alive++;
-    const driven = P.rpm !== 0 || (P.vib && P.vib.on && sim.vibEnv !== 0) || (sim.gate && (sim.gate.vel !== 0 || Math.abs(sim.gate.ang - ((!sim.ctrl || sim.ctrl.mode !== 'feed' || sim.gate.open) ? sim.gate.travel : (sim.gate.a0 || 0))) > 1e-9)) || (sim.safety && (sim.safety.vel !== 0 || Math.abs(sim.safety.off - (sim.safety.open ? sim.safety.push : 0)) > 1e-9))
+    const driven = P.rpm !== 0 || (P.vib && P.vib.on && sim.vibEnv !== 0) || (sim.gate && (sim.gate.vel !== 0 || Math.abs(sim.gate.ang - (((!sim.ctrl || (sim.ctrl.mode !== 'feed' && sim.ctrl.mode !== 'logic')) || sim.gate.open) ? sim.gate.travel : (sim.gate.a0 || 0))) > 1e-9)) || (sim.safety && (sim.safety.vel !== 0 || Math.abs(sim.safety.off - (sim.safety.open ? sim.safety.push : 0)) > 1e-9))
       || (C && (C.state !== 'idle' || C.queue > 0 || (C.needs && C.needs.length > 0) || C.awaitClear || C.awaitS3 != null || C.closeAt != null)) || alive !== R.n;
     R.n = alive;
     if (driven || !P.restSleep) { R.asleep = false; R.still = 0; R.ref = null; return false; }
@@ -1952,7 +1972,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function stepOnce(sim) {
     const P = sim.P, B = sim.bodies, dt = P.dt, n = B.n;
     if (P.restSleep && restCheck(sim)) {   // at rest: advance everything except the (unchanging) contact solve
-      if (sim.gate) { if (!sim.ctrl || sim.ctrl.mode !== 'feed') sim.gate.open = true; gateStep(sim, dt); } if (sim.safety) safetyStep(sim, dt);
+      if (sim.gate) { if (!sim.ctrl || (sim.ctrl.mode !== 'feed' && sim.ctrl.mode !== 'logic')) sim.gate.open = true; gateStep(sim, dt); } if (sim.safety) safetyStep(sim, dt);
       sim.t += dt; sim.steps++; sim.wearT += dt; sim.restT = (sim.restT || 0) + dt;
       if (sim.ctrl) ctrlStep(sim, dt);
       if ((sim.steps & 15) === 0) { const f = sim.foam, cl = sim.cells, dtr = dt * 16, kr = Math.exp(-dtr / f.tauRec), kd = Math.exp(-dtr / 0.05);
@@ -1964,7 +1984,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (P.vib && P.vib.on && sim.vibEnv !== 0) { const V = P.vib, a = (sim.vibEnv == null ? 1 : sim.vibEnv) * V.accel_g * 9.81 * Math.sin(TAU * V.freq * sim.t), d = V.dir; g = [g[0] - a * d[0], g[1] - a * d[1], g[2] - a * d[2]]; }
     const PPX = B.ppx || (B.ppx = new Map());
     if ((sim.steps & 1023) === 0) for (const [k_, e_] of PPX) if (e_[3] < sim.steps) PPX.delete(k_);   // drop broken pill-pill contacts
-    if (sim.gate) { if (!sim.ctrl || sim.ctrl.mode !== 'feed') sim.gate.open = true; gateStep(sim, dt); }   // continuous (or no controller): gate held open
+    if (sim.gate) { if (!sim.ctrl || (sim.ctrl.mode !== 'feed' && sim.ctrl.mode !== 'logic')) sim.gate.open = true; gateStep(sim, dt); }   // continuous (or no controller): gate held open
     if (sim.safety) safetyStep(sim, dt);
     sim.omegaCam = -P.rpm * TAU / 60;
     sim.theta += sim.omegaCam * dt;
@@ -2244,7 +2264,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (!sim) return;
     if (typeof TEX !== 'undefined' && sim.cells) applyTex();
     applyVib(); applyTire(); applyHum(); applySing(); xpApply(); sim.P.dustTack = S.dustTack ? 1 : 0; sim.P.dustStatic = S.dustStatic;
-    if (S.ctrl && S.ctrl.mode === 'feed' && sim.ctrl) sim.ctrl.rpmRun = S.rpm; else sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1;
+    if (S.ctrl && (S.ctrl.mode === 'feed' || S.ctrl.mode === 'logic') && sim.ctrl) sim.ctrl.rpmRun = S.rpm; else sim.P.rpm = S.rpm; sim.P.thickness = S.thick * 1e-3; sim.P.gravity = [0, 0, -S.g]; sim.P.dt = S.dtMode; sim.P.phaseB = S.camPhase * PI / 180; sim.P.wearX = S.wearX || 1;
     applyCtrl();
   }
   function applyFoam() { // keep wear state, replace material
@@ -2700,7 +2720,22 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   const SHAPES = { tablet: 'Round tablet (rounded disc)', capsule: 'Caplet / capsule', sphere: 'Sphere (round bead)', ellipsoid: 'Oval / softgel (ellipsoid)' };
   $('shape').innerHTML = Object.entries(SHAPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   const PILLS = { 'Round tablet 8 × 3.5': { shape: 'tablet', W: 8, T: 3.5, edge: 0.8, density: 1300 }, 'Small tablet 5 × 2': { shape: 'tablet', W: 5, T: 2, edge: 0.8, density: 1300 }, 'Large tablet 12 × 5': { shape: 'tablet', W: 12, T: 5, edge: 0.6, density: 1400 }, 'Caplet 16 × 6.5': { shape: 'capsule', L: 16, W: 6.5, density: 1300 }, 'Softgel 14 × 8': { shape: 'ellipsoid', L: 14, W: 8, T: 7, density: 1100, mat: 'softgel' }, 'Round bead Ø6': { shape: 'sphere', W: 6, density: 1200, mat: 'coated' }, 'Gel cap 19 × 7.5': { shape: 'capsule', L: 19, W: 7.5, density: 1050, mat: 'gelcap' } };
+  // user-saved pills (kept in this browser): listed with a star in the preset menu and the dispenser bank's pill menu
+  const UPK = 'ffPills1', BUILTIN_PILLS = new Set(Object.keys(PILLS));
+  const loadUserPills = () => { let u = {}; try { u = JSON.parse(localStorage.getItem(UPK) || '{}') || {}; } catch (e) {} for (const k of Object.keys(PILLS)) if (!BUILTIN_PILLS.has(k)) delete PILLS[k]; for (const [k, v] of Object.entries(u)) PILLS['★ ' + k] = v; return u; };
+  const pillMenus = () => { const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;'); const o = Object.keys(PILLS).map(n => `<option>${esc(n)}</option>`).join('');
+    $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + o; const bp = $('bkPill'); if (bp) bp.innerHTML = '<option value="">change pill…</option>' + o; };
+  loadUserPills();
   $('pillPreset').innerHTML = '<option value="">Pill presets…</option>' + Object.keys(PILLS).map(n => `<option>${n}</option>`).join('');
+  setTimeout(pillMenus, 0);
+  $('pillSave').onclick = () => { const u = loadUserPills(), p = S.pill, def = p.name || `${p.shape} ${p.shape === 'tablet' || p.shape === 'sphere' ? p.W : p.L + ' × ' + p.W} mm`;
+    const name = (prompt('Name for this pill (it will appear in the pill presets list):', def) || '').trim(); if (!name) return;
+    if (u[name] && !confirm(`Replace your saved pill "${name}"?`)) return;
+    const q = JSON.parse(JSON.stringify(p)); q.name = name; u[name] = q; try { localStorage.setItem(UPK, JSON.stringify(u)); } catch (e) { alert('Could not save (browser storage is full or blocked).'); return; }
+    S.pill.name = name; loadUserPills(); pillMenus(); };
+  $('pillDel').onclick = () => { const u = loadUserPills(), names = Object.keys(u); if (!names.length) { alert('No saved pills yet. Set up a pill and press ★ Save this pill.'); return; }
+    const pick = (prompt('Type the name of the saved pill to remove:\n\n' + names.join('\n'), names[names.length - 1]) || '').trim(); if (!pick) return;
+    if (!u[pick]) { alert(`No saved pill named "${pick}".`); return; } delete u[pick]; try { localStorage.setItem(UPK, JSON.stringify(u)); } catch (e) {} loadUserPills(); pillMenus(); };
 
   function syncUI() {
     singUI(); if (typeof bankUI === 'function' && $('bkTbl')) bankUI();
@@ -2759,7 +2794,8 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     c.sensors.forEach((x, i) => { for (const k of ['on', 'zone', 'pos_mm', 'up_mm', 'below_mm', 'side_mm', 'axis', 'beam_mm', 'response_ms', 'min_block_ms', 'min_clear_ms', 'count_on']) if (x[k] !== undefined) C.sensors[i][k] = x[k]; });
     C.mode = c.mode; C.rpmRun = S.rpm;
     if (c.mode === 'feed' && was !== 'feed') { C.gWant = false; C.outN = C.exitN; C.held = 0; C.snap = false; C.snapPend = false; C.s2q.length = 0; C.p1q.length = 0; C.closeAt = null; C.awaitClear = false; C.awaitS3 = null; C.state = 'idle'; C.queue = 0; sim.P.rpm = 0; C.mRpm = 0; C.lash = null; sim.vibEnv = 0; }
-    if (c.mode !== 'feed') { C.state = 'idle'; C.queue = 0; sim.P.rpm = S.rpm; sim.vibEnv = null; }
+    if (c.mode === 'logic') { if (was !== 'logic') { C.state = 'idle'; C.queue = 0; C.needs.length = 0; sim.P.rpm = 0; C.mRpm = 0; sim.vibEnv = 0; C.lT = null; C.L = null; } if (window.FFLogic) FFLogic.attach(); }
+    else if (c.mode !== 'feed') { C.state = 'idle'; C.queue = 0; sim.P.rpm = S.rpm; sim.vibEnv = null; }
   }
   function syncCtrlUI() {
     const c = ctS(), sn = c.sensors[c.sel];
@@ -2803,7 +2839,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   const stepN = d => { const n = Math.max(1, Math.min(1000, ctS().n + d)); ctS().n = n; $('ctN').value = n; backUI(); dispLbl(); };
   $('ctNm').onclick = () => stepN(-1); $('ctNp').onclick = () => stepN(1);
   // pressing a Feed button in Continuous mode switches to Feed on demand (belts stop, then the feed starts)
-  function feedReq(n) { if (ctS().mode !== 'feed') { ctS().mode = 'feed'; applyCtrl(); syncCtrlUI(); } const C = sim.ctrl; if (C) { C.needs.push(n); C.queue++; } }
+  function feedReq(n) { if (ctS().mode === 'logic') { if (sim.ctrl) sim.ctrl.Lcall = (sim.ctrl.Lcall || 0) + Math.max(1, n || 1); return; } if (ctS().mode !== 'feed') { ctS().mode = 'feed'; applyCtrl(); syncCtrlUI(); } const C = sim.ctrl; if (C) { C.needs.push(n); C.queue++; } }
   $('btnFeed').onclick = () => feedReq(ctS().n);
   /* ---- big action dock (always on screen): dispense N, stop, refill, nonstop, pause + a plain-language status line */
   $('dkMinus').onclick = () => stepN(-1); $('dkPlus').onclick = () => stepN(1);
@@ -2825,6 +2861,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (S.paused) { t = 'Paused'; }
     else if (!alive && c.mode === 'feed') { t = 'Hopper is empty — press ⟳ Refill hopper'; cls = 'err'; }
     else if (rej) { t = 'Locked: lot rejected. Acknowledge to continue.'; cls = 'err'; }
+    else if (c.mode === 'logic') { t = sim.ctrl && sim.ctrl.logicErr ? 'Logic error: ' + sim.ctrl.logicErr : 'Custom logic running' + (sim.ctrl && sim.ctrl.L && sim.ctrl.L.motor ? ' · motor on' : ''); cls = sim.ctrl && sim.ctrl.logicErr ? 'err' : 'busy'; }
     else if (c.mode !== 'feed') { t = 'Belts running nonstop'; cls = 'busy'; }
     else if (!C || C.state === 'idle') { t = C && C.queue ? 'Starting…' : (C && C.cur && C.cur.timeout ? 'Last dispense timed out — no pill came out. Ready.' : 'Ready — press DISPENSE'); cls = C && C.cur && C.cur.timeout ? 'err' : ''; }
     else { const need = C.cur ? C.cur.need || 1 : 1, got = C.cur ? C.cur.n : 0;
@@ -2844,7 +2881,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     $('btnFeed').disabled = !!C.reject;
     if (sim.gate) { const w = C.lastWin, p = C.lastPlan, need = FFx.gateBlockTimeOpen(sim), n = C.tauThr.length;
       $('r_win').textContent = (p ? `last pill ${fmt(p.L * 1e3, 1)} mm long (S2${p.gripped ? ' × belt speed' : ' × free-drop speed'}${p.Lok ? '' : ' — not plausible for this pill, not used'}) · exit→gate top ${fmt(p.drop_mm, 0)} mm · ` : '') + (n >= 3 ? `gate starts closing ${fmt(FFx.pctl(C.tauThr, 0.8) * 1e3, 0)} ms after S2 clears (learned, ${n} pills)` : `learning exit timing (${n}/3) — closing on S3 meanwhile`) + ` · gate to drop path ${fmt(need * 1e3, 0)} ms` + (w ? ` · last double: ${w.ok ? 'CAUGHT' : 'REJECT'} (gate across in ${fmt(Math.min(9999, (w.tEdge - w.t) * 1e3), 0)} ms, pill at gate in ${fmt((w.tArr - w.t) * 1e3, 0)} ms)` : ''); }
-    $('r_ct').textContent = C.reject ? 'LOCKED — lot rejected' : C.mode !== 'feed' ? 'continuous · belts running' : C.state === 'release' ? (C.tRel < 0 ? 'releasing held pill — opening gate only' : `releasing held pill — gate open, belts start in ${fmt(Math.max(0, C.release_wait_s - (sim.t - C.tRel)), 1)} s if S3 sees nothing`) : C.state === 'feeding' && sim.gate && C.wait_gate && sim.P.rpm === 0 && sim.gate.ang < sim.gate.travel - 1e-6 && !sim.gate.stall ? 'opening gate — belts start when open' : C.state === 'feeding' ? `FEEDING${C.cur.need > 1 ? ' pill ' + Math.min(C.cur.n + 1, C.cur.need) + ' of ' + C.cur.need : ''} ${fmt(sim.t - C.cur.t0, 1)} s · ${fmt(Math.abs(P.rpm), 0)} rpm${C.queue ? ' · ' + C.queue + ' queued' : ''}` : C.state === 'stopping' ? 'pill seen — stopping' : C.state === 'clearing' ? `double at S1 — reversing into hopper ${fmt((C.cur && C.cur.cleared || 0) * 1e3, 1)} / ${fmt(C.clrNeed * 1e3, 1)} mm (try ${C.cur ? C.cur.clears : 1})` : C.state === 'backup' ? `backing up ${fmt((C.cur && C.cur.backed || 0) * 1e3, 1)} / ${fmt(C.backup_mm, 1)} mm` : `stopped${C.queue ? ' · next in ' + fmt(Math.max(0, C.tNext - sim.t), 1) + ' s (' + C.queue + ' queued)' : ' · ready'}${P.rpm !== 0 ? ' (ramping down)' : ''}`;
+    $('r_ct').textContent = C.reject ? 'LOCKED — lot rejected' : C.mode === 'logic' ? 'custom logic' + (C.logicErr ? ' · error' : '') : C.mode !== 'feed' ? 'continuous · belts running' : C.state === 'release' ? (C.tRel < 0 ? 'releasing held pill — opening gate only' : `releasing held pill — gate open, belts start in ${fmt(Math.max(0, C.release_wait_s - (sim.t - C.tRel)), 1)} s if S3 sees nothing`) : C.state === 'feeding' && sim.gate && C.wait_gate && sim.P.rpm === 0 && sim.gate.ang < sim.gate.travel - 1e-6 && !sim.gate.stall ? 'opening gate — belts start when open' : C.state === 'feeding' ? `FEEDING${C.cur.need > 1 ? ' pill ' + Math.min(C.cur.n + 1, C.cur.need) + ' of ' + C.cur.need : ''} ${fmt(sim.t - C.cur.t0, 1)} s · ${fmt(Math.abs(P.rpm), 0)} rpm${C.queue ? ' · ' + C.queue + ' queued' : ''}` : C.state === 'stopping' ? 'pill seen — stopping' : C.state === 'clearing' ? `double at S1 — reversing into hopper ${fmt((C.cur && C.cur.cleared || 0) * 1e3, 1)} / ${fmt(C.clrNeed * 1e3, 1)} mm (try ${C.cur ? C.cur.clears : 1})` : C.state === 'backup' ? `backing up ${fmt((C.cur && C.cur.backed || 0) * 1e3, 1)} / ${fmt(C.backup_mm, 1)} mm` : `stopped${C.queue ? ' · next in ' + fmt(Math.max(0, C.tNext - sim.t), 1) + ' s (' + C.queue + ' queued)' : ' · ready'}${P.rpm !== 0 ? ' (ramping down)' : ''}`;
     $('r_ct').style.color = C.state === 'feeding' ? '#7d9' : C.state === 'stopping' || C.state === 'backup' ? '#fc6' : '';
     { const nm = { entry: 'Entry', probe: 'Probe', exit: 'Exit', gate: 'Out' }; $('r_sens').textContent = C.sensors.map((x, i) => x.on ? `${nm[x.zone] || 'S' + (i + 1)}${i === C.trigger ? '*' : ''} ${x.out ? '■' : '□'} ${x.count}` : null).filter(Boolean).join(' · ') || 'none on'; }
     if (sim.gate) { const g = sim.gate, L = g.link, s_ = g.off * 1e3 - (g.base || 0), deg = (g.ang - (g.a0 || 0)) * 180 / PI, mov = Math.abs(g.vel) > 1e-5, cl = false;
@@ -2909,7 +2946,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('pMat').onchange = () => { const m = $('pMat').value, M = FFx.PILL_MATS[m]; S.pill.mat = m; S.pill.fri = M.fri; S.pill.tack = M.tack;
     for (const k of ['mat', 'fri', 'tack']) { sim.pillType.spec[k] = S.pill[k]; for (let i = 0; i < sim.bodies.n; i++) sim.bodies.type[i].spec[k] = S.pill[k]; } syncUI(); };
   function rebuildPills() { const wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) }; const th = sim.theta, Sx = sim.S, wT = sim.wearT; newSim(); applyFoam(); sim.wearT = wT; sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i])); sim.theta = th; sim.S = Sx; }
-  $('pillPreset').addEventListener('change', e => { const p = PILLS[e.target.value]; if (!p) return; delete S.pill.fri; delete S.pill.tack; Object.assign(S.pill, { L: p.W, T: p.W, edge: 0.8, mat: 'pressed' }, p); if (p.shape === 'tablet') S.pill.L = p.W; syncUI(); later(rebuildPills, 50); e.target.value = ''; });
+  $('pillPreset').addEventListener('change', e => { const p = PILLS[e.target.value]; if (!p) return; delete S.pill.fri; delete S.pill.tack; delete S.pill.name; Object.assign(S.pill, { L: p.W, T: p.W, edge: 0.8, mat: 'pressed' }, p); if (p.shape === 'tablet') S.pill.L = p.W; syncUI(); later(rebuildPills, 50); e.target.value = ''; });
   $('btnFill').onclick = () => { sim.addPills(S.count); };
   $('btnClear').onclick = () => { sim.reset(false); };
   $('btnWear').onclick = () => { sim.resetFoam(); };
@@ -3318,7 +3355,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     for (const [m, v] of Object.entries(st.dustT || {})) { const a = L.T[m] || (L.T[m] = { shed: 0, esc: 0 }), b = seen.T[m] || (seen.T[m] = { shed: 0, esc: 0 }); if (v.shed < b.shed || v.esc < b.esc) { b.shed = 0; b.esc = 0; } a.shed += v.shed - b.shed; a.esc += v.esc - b.esc; b.shed = v.shed; b.esc = v.esc; } }
   function bankStep() {
     if (!BANK.q.length || !sim) return; const C = sim.ctrl;
-    const busy = C && (C.state !== 'idle' || C.queue > 0 || C.needs.length > 0 || C.awaitClear || C.awaitS3 != null || C.closeAt != null || (sim.gate && sim.gate.ang > (sim.gate.a0 || 0) + 1e-6));
+    const busy = C && ((C.mode === 'logic' && ((C.Lcall || 0) > 0 || (C.L && (C.L.motor || C.L.gate)))) || C.state !== 'idle' || C.queue > 0 || C.needs.length > 0 || C.awaitClear || C.awaitS3 != null || C.closeAt != null || (sim.gate && sim.gate.ang > (sim.gate.a0 || 0) + 1e-6));
     if (busy) return; const c = BANK.q.shift(); activate(c.k); feedReq(c.n);
   }
   function setBankN(n) { n = Math.max(1, Math.min(32, Math.round(n) || 1));
@@ -3684,7 +3721,7 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   $('vibDir').onchange = e => { S.vib.axis = e.target.value; applyVib(); };
 
   // test hooks
-  window.__FF = { get sim() { return sim; }, S, cam, setPreset, frame, step: n => sim.step(n), render, BANK, setBankN, beltMesh, get idleBelt() { return idleBelt; }, get dustGL() { return dustGL; } };
+  window.__FF = { get sim() { return sim; }, ctS: () => ctS(), applyCtrl: () => applyCtrl(), syncCtrlUI: () => syncCtrlUI(), feedReq: n => feedReq(n), S, cam, setPreset, frame, step: n => sim.step(n), render, BANK, setBankN, beltMesh, get idleBelt() { return idleBelt; }, get dustGL() { return dustGL; } };
 
   newSim(); syncUI(); applyFoam(); applyParams(); applyTex();
   $('camShape').value = 'round'; applyCamProfile(new Array(72).fill(7.0), 'Round drive wheel (r 7.0 mm, no lobes) — default');   // default drive: round wheel
@@ -3792,5 +3829,539 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
       x.sec.querySelector('.sum').textContent = t || ''; } }
   sums(); setInterval(sums, 500);
 })();
+</script>
+<script>
+/* FoamFeed logic editor: a node-graph controller. Blocks (sensors, conditions, gates, timers, memory, math, signals,
+   actions) are wired output -> input; the graph is compiled into the sim's controller loop (C.logicFn, run every
+   loop_ms of sim time by the engine's logic mode) and can be exported as an Arduino sketch, JavaScript or JSON.
+   Bool ports carry true/false, number ports carry values; a bool feeding a number reads 0/1, a number feeding a bool
+   reads true when it is not 0. Unconnected inputs use the block's own setting. Signals (send/receive) are a named bus
+   that delivers on the next controller tick (like a message between two tasks). */
+(function () {
+  'use strict';
+  const NB = 'b', NN = 'n', KEY_CUR = 'ffLogicCur1', KEY_LIB = 'ffLogicLib1';
+  const SENS = [['S1 · probe (conveyor)', 0], ['S2 · exit (conveyor end)', 1], ['S3 · out (under the gate)', 2]];
+  const CATS = { input: ['Inputs', '#3b79d6'], cond: ['Conditions', '#c9902c'], logic: ['Logic gates', '#8a5cd6'], time: ['Timing', '#2aa39a'], mem: ['Memory & counting', '#d6608a'], math: ['Math', '#6f8db3'], sig: ['Signals', '#57a84a'], act: ['Actions (outputs)', '#d65a3b'] };
+  const B = v => typeof v === 'boolean' ? v : !!(+v), N = v => typeof v === 'boolean' ? (v ? 1 : 0) : (+v || 0);
+  const OPS = { '>': (a, b) => a > b, '≥': (a, b) => a >= b, '<': (a, b) => a < b, '≤': (a, b) => a <= b, '=': (a, b) => Math.abs(a - b) < 1e-9, '≠': (a, b) => Math.abs(a - b) >= 1e-9 };
+  const COPS = { '>': '>', '≥': '>=', '<': '<', '≤': '<=', '=': '==', '≠': '!=' };
+  const MOPS = { '+': (a, b) => a + b, '−': (a, b) => a - b, '×': (a, b) => a * b, '÷': (a, b) => b !== 0 ? a / b : 0, 'min': Math.min, 'max': Math.max };
+  const MCPP = { '+': (a, b) => `(${a} + ${b})`, '−': (a, b) => `(${a} - ${b})`, '×': (a, b) => `(${a} * ${b})`, '÷': (a, b) => `((${b}) != 0 ? (${a}) / (${b}) : 0)`, 'min': (a, b) => `fminf(${a}, ${b})`, 'max': (a, b) => `fmaxf(${a}, ${b})` };
+  const f = x => { const v = +x; return Number.isInteger(v) ? v.toFixed(1) : String(v); };
+  /* block types. ins/outs: [name, type, default-param-key]; p: settings; ev(I, P, S, X) -> outputs; cpp(I, P, O, s) -> C++ lines
+     (I = input expressions, O = output variable names, s = prefix for this block's state variables) */
+  const T = {
+    sensor: { cat: 'input', label: 'Beam sensor', help: 'An IR beam sensor. "blocked" is true while a pill is in the beam (after the sensor\'s response time); "pill in"/"pill out" pulse for one tick when it is blocked / clears; "count" counts pills (its debounce settings are in Dispense control & sensors).',
+      ins: [], outs: [['blocked', NB], ['pill in', NB], ['pill out', NB], ['count', NN]], p: [{ k: 'which', l: 'Sensor', type: 'sel', def: 1, opts: SENS }],
+      sub: P => ['S1', 'S2', 'S3'][P.which] || 'S?',
+      ev: (I, P, S, X) => { const sn = X.C.sensors[P.which]; const on = !!(sn && sn.on && sn.blk), c = sn ? sn.count : 0; /* debounced beam state */ const r = on && !S.p, fl = !on && !!S.p; S.p = on; return [on, r, fl, c]; },
+      cpp: (I, P, O, s) => [`{ bool on = sensorBlocked(${P.which}); ${O[1]} = on && !${s}p; ${O[2]} = !on && ${s}p; ${s}p = on; ${O[0]} = on; ${O[3]} = sensorCount[${P.which}]; }`], st: s => [`bool ${s}p = false;`] },
+    call: { cat: 'input', label: 'Dispense button', help: 'Pulses for one tick each time a dose is called (the Dispense button, the dock, or a bank call). "pending" is how many more calls are waiting.',
+      ins: [], outs: [['pressed', NB], ['pending', NN]], p: [],
+      ev: (I, P, S, X) => { const C = X.C; let pr = false; if ((C.Lcall || 0) > 0 && !X.callTaken) { C.Lcall--; pr = true; X.callTaken = true; } return [pr, C.Lcall || 0]; },
+      cpp: (I, P, O, s) => [`${O[0]} = callPressed; ${O[1]} = 0;`] },
+    toggle: { cat: 'input', label: 'Switch', help: 'A switch you flip by hand (also while the sim runs) to try things out.', ins: [], outs: [['on', NB]], p: [{ k: 'on', l: 'On', type: 'bool', def: false }],
+      sub: P => P.on ? 'ON' : 'off', ev: (I, P) => [!!P.on], cpp: (I, P, O) => [`${O[0]} = ${P.on ? 'true' : 'false'};`] },
+    number: { cat: 'input', label: 'Number', help: 'A value to tune: drag its slider while the sim runs and watch the effect.', ins: [], outs: [['value', NN]],
+      p: [{ k: 'v', l: 'Value', type: 'num', def: 12, min: -100, max: 100, step: 0.1 }], sub: P => String(P.v), ev: (I, P) => [+P.v], cpp: (I, P, O) => [`${O[0]} = ${f(P.v)};`] },
+    clock: { cat: 'input', label: 'Time', help: 'Seconds since the start (sim time; on the board, time since power-up).', ins: [], outs: [['seconds', NN]], p: [], ev: (I, P, S, X) => [X.t], cpp: (I, P, O) => [`${O[0]} = millis() / 1000.0;`] },
+    compare: { cat: 'cond', label: 'Compare', help: 'True when A (op) B. B comes from the setting unless something is wired into it.', ins: [['A', NN], ['B', NN, 'b']], outs: [['true', NB]],
+      p: [{ k: 'op', l: 'Test', type: 'sel', def: '>', opts: Object.keys(OPS).map(k => ['A ' + k + ' B', k]) }, { k: 'b', l: 'B', type: 'num', def: 0, min: -1000, max: 1000, step: 0.1 }],
+      sub: P => 'A ' + P.op + ' ' + (P.b), ev: (I, P) => [OPS[P.op](N(I[0]), N(I[1]))], cpp: (I, P, O) => [`${O[0]} = (${I[0]}) ${COPS[P.op]} (${I[1]});`] },
+    range: { cat: 'cond', label: 'In range', help: 'True while the value is between Low and High (inclusive).', ins: [['value', NN]], outs: [['inside', NB], ['outside', NB]],
+      p: [{ k: 'lo', l: 'Low', type: 'num', def: 0, min: -1000, max: 1000, step: 0.1 }, { k: 'hi', l: 'High', type: 'num', def: 10, min: -1000, max: 1000, step: 0.1 }], sub: P => `${P.lo} … ${P.hi}`,
+      ev: (I, P) => { const v = N(I[0]), k = v >= P.lo && v <= P.hi; return [k, !k]; }, cpp: (I, P, O) => [`${O[0]} = (${I[0]}) >= ${f(P.lo)} && (${I[0]}) <= ${f(P.hi)}; ${O[1]} = !${O[0]};`] },
+    ifte: { cat: 'cond', label: 'If · then · else', help: 'IF the condition is true THEN output the "then" value, ELSE the "else" value. Use it to switch a speed, a time or a target.', ins: [['if', NB], ['then', NN, 'a'], ['else', NN, 'b']], outs: [['result', NN]],
+      p: [{ k: 'a', l: 'Then', type: 'num', def: 1, min: -1000, max: 1000, step: 0.1 }, { k: 'b', l: 'Else', type: 'num', def: 0, min: -1000, max: 1000, step: 0.1 }],
+      ev: (I) => [B(I[0]) ? N(I[1]) : N(I[2])], cpp: (I, P, O) => [`${O[0]} = (${I[0]}) ? (${I[1]}) : (${I[2]});`] },
+    and: { cat: 'logic', label: 'AND', help: 'True only when every connected input is true.', ins: [['a', NB, 't'], ['b', NB, 't'], ['c', NB, 't']], outs: [['out', NB]], p: [], dflt: true,
+      ev: (I) => [B(I[0]) && B(I[1]) && B(I[2])], cpp: (I, P, O) => [`${O[0]} = (${I[0]}) && (${I[1]}) && (${I[2]});`] },
+    or: { cat: 'logic', label: 'OR', help: 'True when any input is true.', ins: [['a', NB], ['b', NB], ['c', NB]], outs: [['out', NB]], p: [],
+      ev: (I) => [B(I[0]) || B(I[1]) || B(I[2])], cpp: (I, P, O) => [`${O[0]} = (${I[0]}) || (${I[1]}) || (${I[2]});`] },
+    not: { cat: 'logic', label: 'NOT', help: 'Flips true and false.', ins: [['in', NB]], outs: [['out', NB]], p: [], ev: (I) => [!B(I[0])], cpp: (I, P, O) => [`${O[0]} = !(${I[0]});`] },
+    xor: { cat: 'logic', label: 'XOR', help: 'True when exactly one of the two inputs is true.', ins: [['a', NB], ['b', NB]], outs: [['out', NB]], p: [], ev: (I) => [B(I[0]) !== B(I[1])], cpp: (I, P, O) => [`${O[0]} = (${I[0]}) != (${I[1]});`] },
+    edge: { cat: 'time', label: 'Edge detect', help: 'One-tick pulse when the input turns on (rising), off (falling), or either.', ins: [['in', NB]], outs: [['pulse', NB]],
+      p: [{ k: 'm', l: 'On', type: 'sel', def: 'rise', opts: [['turning on', 'rise'], ['turning off', 'fall'], ['either', 'both']] }], sub: P => ({ rise: '↑', fall: '↓', both: '↕' })[P.m],
+      ev: (I, P, S) => { const v = B(I[0]), r = v && !S.p, fl = !v && !!S.p; S.p = v; return [P.m === 'rise' ? r : P.m === 'fall' ? fl : r || fl]; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; ${O[0]} = ${P.m === 'rise' ? `v && !${s}p` : P.m === 'fall' ? `!v && ${s}p` : `v != ${s}p`}; ${s}p = v; }`], st: s => [`bool ${s}p = false;`] },
+    ton: { cat: 'time', label: 'Delay on', help: 'Output turns on once the input has been on for the delay (and off as soon as the input drops). Filters out short blips.', ins: [['in', NB]], outs: [['out', NB], ['elapsed s', NN]],
+      p: [{ k: 'ms', l: 'Delay', type: 'num', def: 200, min: 0, max: 10000, step: 1, unit: 'ms' }], sub: P => P.ms + ' ms',
+      ev: (I, P, S, X) => { if (B(I[0])) S.e = (S.e || 0) + X.dt; else S.e = 0; return [B(I[0]) && S.e >= P.ms * 1e-3 - 1e-9, S.e]; },
+      cpp: (I, P, O, s) => [`if (${I[0]}) ${s}e += DT; else ${s}e = 0; ${O[0]} = (${I[0]}) && ${s}e >= ${f(P.ms / 1000)}; ${O[1]} = ${s}e;`], st: s => [`float ${s}e = 0;`] },
+    tof: { cat: 'time', label: 'Delay off', help: 'Output turns on with the input and stays on for the delay after the input drops (e.g. keep the gate open a little after the pill passes).', ins: [['in', NB]], outs: [['out', NB]],
+      p: [{ k: 'ms', l: 'Hold', type: 'num', def: 400, min: 0, max: 10000, step: 1, unit: 'ms' }], sub: P => P.ms + ' ms',
+      ev: (I, P, S, X) => { if (B(I[0])) S.e = 0; else S.e = (S.e == null ? 1e9 : S.e) + X.dt; return [B(I[0]) || S.e < P.ms * 1e-3 - 1e-9]; },
+      cpp: (I, P, O, s) => [`if (${I[0]}) ${s}e = 0; else ${s}e += DT; ${O[0]} = (${I[0]}) || ${s}e < ${f(P.ms / 1000)};`], st: s => [`float ${s}e = 1e9;`] },
+    pulse: { cat: 'time', label: 'Pulse', help: 'When the trigger turns on, output a pulse of fixed length (re-triggering while it runs is ignored).', ins: [['trigger', NB]], outs: [['out', NB]],
+      p: [{ k: 'ms', l: 'Length', type: 'num', def: 300, min: 1, max: 10000, step: 1, unit: 'ms' }], sub: P => P.ms + ' ms',
+      ev: (I, P, S, X) => { const v = B(I[0]); if (v && !S.p && !(S.r > 0)) S.r = P.ms * 1e-3; S.p = v; const on = S.r > 0; if (on) S.r -= X.dt; return [on]; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p && ${s}r <= 0) ${s}r = ${f(P.ms / 1000)}; ${s}p = v; ${O[0]} = ${s}r > 0; if (${s}r > 0) ${s}r -= DT; }`], st: s => [`bool ${s}p = false; float ${s}r = 0;`] },
+    osc: { cat: 'time', label: 'Oscillator', help: 'Square wave while enabled: on for duty % of every period. Good for pulsing the vibrator or testing an actuator.', ins: [['enable', NB, 't']], outs: [['out', NB]], dflt: true,
+      p: [{ k: 'ms', l: 'Period', type: 'num', def: 500, min: 2, max: 20000, step: 1, unit: 'ms' }, { k: 'duty', l: 'Duty', type: 'num', def: 50, min: 0, max: 100, step: 1, unit: '%' }], sub: P => `${P.ms} ms · ${P.duty}%`,
+      ev: (I, P, S, X) => { if (!B(I[0])) { S.ph = 0; return [false]; } S.ph = ((S.ph || 0) + X.dt) % (P.ms * 1e-3); return [S.ph < P.ms * 1e-3 * P.duty / 100]; },
+      cpp: (I, P, O, s) => [`if (!(${I[0]})) { ${s}ph = 0; ${O[0]} = false; } else { ${s}ph = fmod(${s}ph + DT, ${f(P.ms / 1000)}); ${O[0]} = ${s}ph < ${f(P.ms / 1000 * P.duty / 100)}; }`], st: s => [`float ${s}ph = 0;`] },
+    latch: { cat: 'mem', label: 'Latch (set / reset)', help: 'Remembers: "set" turns it on, "reset" turns it off, and it stays that way in between. The core of "run until the sensor sees the pill".', ins: [['set', NB], ['reset', NB]], outs: [['on', NB], ['off', NB]],
+      p: [{ k: 'pri', l: 'If both', type: 'sel', def: 'reset', opts: [['reset wins', 'reset'], ['set wins', 'set']] }],
+      ev: (I, P, S) => { const st = B(I[0]), rs = B(I[1]); if (st && rs) S.q = P.pri === 'set'; else if (st) S.q = true; else if (rs) S.q = false; return [!!S.q, !S.q]; },
+      cpp: (I, P, O, s) => [`{ bool st = ${I[0]}, rs = ${I[1]}; if (st && rs) ${s}q = ${P.pri === 'set'}; else if (st) ${s}q = true; else if (rs) ${s}q = false; ${O[0]} = ${s}q; ${O[1]} = !${s}q; }`], st: s => [`bool ${s}q = false;`] },
+    flip: { cat: 'mem', label: 'Toggle', help: 'Each time the input turns on, the output flips.', ins: [['trigger', NB], ['reset', NB]], outs: [['on', NB]], p: [],
+      ev: (I, P, S) => { const v = B(I[0]); if (v && !S.p) S.q = !S.q; S.p = v; if (B(I[1])) S.q = false; return [!!S.q]; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p) ${s}q = !${s}q; ${s}p = v; if (${I[1]}) ${s}q = false; ${O[0]} = ${s}q; }`], st: s => [`bool ${s}p = false, ${s}q = false;`] },
+    counter: { cat: 'mem', label: 'Counter', help: 'Counts each time "count" turns on; "done" is true once it reaches the target. "reset" sets it back to 0.', ins: [['count', NB], ['reset', NB]], outs: [['value', NN], ['done', NB]],
+      p: [{ k: 'n', l: 'Target', type: 'num', def: 1, min: 1, max: 100, step: 1 }], sub: P => '→ ' + P.n,
+      ev: (I, P, S) => { const v = B(I[0]); if (B(I[1])) S.c = 0; else if (v && !S.p) S.c = (S.c || 0) + 1; S.p = v; return [S.c || 0, (S.c || 0) >= P.n]; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (${I[1]}) ${s}c = 0; else if (v && !${s}p) ${s}c++; ${s}p = v; ${O[0]} = ${s}c; ${O[1]} = ${s}c >= ${Math.round(P.n)}; }`], st: s => [`bool ${s}p = false; long ${s}c = 0;`] },
+    hold: { cat: 'mem', label: 'Sample & hold', help: 'Grabs the value at the moment the trigger turns on and keeps it.', ins: [['value', NN], ['trigger', NB]], outs: [['held', NN]], p: [],
+      ev: (I, P, S) => { const v = B(I[1]); if (v && !S.p) S.h = N(I[0]); S.p = v; return [S.h || 0]; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[1]}; if (v && !${s}p) ${s}h = ${I[0]}; ${s}p = v; ${O[0]} = ${s}h; }`], st: s => [`bool ${s}p = false; float ${s}h = 0;`] },
+    math: { cat: 'math', label: 'Math', help: 'A (op) B.', ins: [['A', NN], ['B', NN, 'b']], outs: [['result', NN]],
+      p: [{ k: 'op', l: 'Op', type: 'sel', def: '×', opts: Object.keys(MOPS).map(k => [k, k]) }, { k: 'b', l: 'B', type: 'num', def: 1, min: -1000, max: 1000, step: 0.1 }], sub: P => 'A ' + P.op + ' ' + P.b,
+      ev: (I, P) => [MOPS[P.op](N(I[0]), N(I[1]))], cpp: (I, P, O) => [`${O[0]} = ${MCPP[P.op](I[0], I[1])};`] },
+    scale: { cat: 'math', label: 'Map range', help: 'Maps a value from one range to another and clamps it (e.g. 0–1 → 6–18 rpm).', ins: [['value', NN]], outs: [['result', NN]],
+      p: [{ k: 'a0', l: 'From low', type: 'num', def: 0, min: -1000, max: 1000, step: 0.1 }, { k: 'a1', l: 'From high', type: 'num', def: 1, min: -1000, max: 1000, step: 0.1 }, { k: 'b0', l: 'To low', type: 'num', def: 0, min: -1000, max: 1000, step: 0.1 }, { k: 'b1', l: 'To high', type: 'num', def: 12, min: -1000, max: 1000, step: 0.1 }],
+      sub: P => `${P.a0}…${P.a1} → ${P.b0}…${P.b1}`,
+      ev: (I, P) => { const u = P.a1 !== P.a0 ? (N(I[0]) - P.a0) / (P.a1 - P.a0) : 0; return [P.b0 + Math.max(0, Math.min(1, u)) * (P.b1 - P.b0)]; },
+      cpp: (I, P, O) => [`${O[0]} = ${f(P.b0)} + constrain(${P.a1 !== P.a0 ? `((${I[0]}) - ${f(P.a0)}) / ${f(P.a1 - P.a0)}` : '0'}, 0.0, 1.0) * ${f(P.b1 - P.b0)};`] },
+    smooth: { cat: 'math', label: 'Smooth', help: 'Eases a value toward its input with a time constant (a soft start / soft stop).', ins: [['value', NN]], outs: [['result', NN]],
+      p: [{ k: 'ms', l: 'Time const.', type: 'num', def: 200, min: 1, max: 10000, step: 1, unit: 'ms' }], sub: P => 'τ ' + P.ms + ' ms',
+      ev: (I, P, S, X) => { const v = N(I[0]); if (S.y == null) S.y = v; S.y += (v - S.y) * Math.min(1, X.dt / (P.ms * 1e-3)); return [S.y]; },
+      cpp: (I, P, O, s) => [`${s}y += ((${I[0]}) - ${s}y) * fminf(1.0f, DT / ${f(P.ms / 1000)}f); ${O[0]} = ${s}y;`], st: s => [`float ${s}y = 0;`] },
+    send: { cat: 'sig', label: 'Send signal', help: 'Puts a value on a named channel. Any "Receive signal" with the same name gets it on the next tick — use it to keep big graphs tidy.', ins: [['value', NN]], outs: [],
+      p: [{ k: 'ch', l: 'Channel', type: 'text', def: 'ready' }], sub: P => '→ ' + P.ch, ev: (I, P, S, X) => { X.sigN[P.ch] = I[0]; return []; }, cpp: (I, P) => [`sigNext[${'SIG_' + cid(P.ch)}] = ${I[0]};`] },
+    recv: { cat: 'sig', label: 'Receive signal', help: 'Reads a named channel (the value sent on the previous tick).', ins: [], outs: [['value', NN], ['on', NB]],
+      p: [{ k: 'ch', l: 'Channel', type: 'text', def: 'ready' }], sub: P => '← ' + P.ch, ev: (I, P, S, X) => { const v = X.sig[P.ch]; return [N(v ?? 0), B(v ?? false)]; }, cpp: (I, P, O) => [`${O[0]} = sig[${'SIG_' + cid(P.ch)}]; ${O[1]} = ${O[0]} != 0;`] },
+    watch: { cat: 'sig', label: 'Watch', help: 'Shows a value big on the block — handy while tuning.', ins: [['value', NN]], outs: [], p: [], ev: (I, P, S) => { S.v = I[0]; return []; }, cpp: () => [] },
+    log: { cat: 'sig', label: 'Log message', help: 'Writes a line to the log (and to Serial on the board) each time the input turns on.', ins: [['when', NB]], outs: [],
+      p: [{ k: 'msg', l: 'Message', type: 'text', def: 'pill counted' }], sub: P => '“' + P.msg + '”',
+      ev: (I, P, S, X) => { const v = B(I[0]); if (v && !S.p) X.log.push([X.t, P.msg]); S.p = v; return []; },
+      cpp: (I, P, O, s) => [`{ bool v = ${I[0]}; if (v && !${s}p) { Serial.print(millis() / 1000.0, 3); Serial.println(F(" ${String(P.msg).replace(/["\\]/g, '')}")); } ${s}p = v; }`], st: s => [`bool ${s}p = false;`] },
+    motor: { cat: 'act', label: 'Conveyor motor', help: 'Runs the belt stepper while "run" is on, at the given belt-drive rpm (ramped by the Ramp setting in Dispense control). "reverse" runs it backwards.', ins: [['run', NB], ['rpm', NN, 'rpm'], ['reverse', NB]], outs: [],
+      p: [{ k: 'rpm', l: 'Speed', type: 'num', def: 12, min: 0, max: 60, step: 0.5, unit: 'rpm' }], sub: P => P.rpm + ' rpm',
+      ev: (I, P, S, X) => { X.L.motor = B(I[0]); X.L.rpm = Math.abs(N(I[1])); X.L.dir = B(I[2]) ? -1 : 1; return []; },
+      cpp: (I, P) => [`outMotor = ${I[0]}; outRpm = fabs(${I[1]}); outDir = (${I[2]}) ? -1 : 1;`] },
+    vib: { cat: 'act', label: 'Vibrator', help: 'Hopper shaker on/off; "amount" 0–1 scales its strength.', ins: [['on', NB], ['amount', NN, 'amt']], outs: [],
+      p: [{ k: 'amt', l: 'Amount', type: 'num', def: 1, min: 0, max: 1, step: 0.05 }], sub: P => Math.round(P.amt * 100) + '%',
+      ev: (I, P, S, X) => { X.L.vib = B(I[0]); X.L.vibAmt = Math.max(0, Math.min(1, N(I[1]))); return []; }, cpp: (I, P) => [`outVib = (${I[0]}) ? constrain(${I[1]}, 0.0, 1.0) : 0;`] },
+    gate: { cat: 'act', label: 'Servo gate', help: 'Opens the servo gate under the conveyor while the input is on (closed otherwise). Its travel and servo speed are in Dispense control & sensors.', ins: [['open', NB]], outs: [], p: [],
+      ev: (I, P, S, X) => { X.L.gate = B(I[0]); return []; }, cpp: I => [`outGate = ${I[0]};`] },
+    safety: { cat: 'act', label: 'Safety gate', help: 'Pushes the pill-width safety gate in (open to the pill\'s width) while the input is on; spring-closed otherwise.', ins: [['open', NB]], outs: [], p: [],
+      ev: (I, P, S, X) => { X.L.safety = B(I[0]); return []; }, cpp: I => [`outSafety = ${I[0]};`] },
+  };
+  const cid = s => String(s || 'x').replace(/[^A-Za-z0-9_]/g, '_').toUpperCase();
+  const ACTIONS = new Set(['motor', 'vib', 'gate', 'safety']);
+
+  // ---------------------------------------------------------------- graph model
+  let G = { nodes: [], links: [], nid: 1, loop_ms: 1, name: 'My logic' };
+  const pdef = t => { const o = {}; for (const q of T[t].p) o[q.k] = q.def; return o; };
+  const mk = (t, x, y, p) => ({ id: G.nid++, t, x, y, p: Object.assign(pdef(t), p || {}) });
+  const linkTo = (nid, ii) => G.links.find(l => l.to[0] === nid && l.to[1] === ii);
+  function TEMPLATES() {
+    const build = (name, fn) => () => { G = { nodes: [], links: [], nid: 1, loop_ms: 1, name }; const n = (t, x, y, p) => { const q = mk(t, x, y, p); G.nodes.push(q); return q.id; }, w = (a, ao, b, bi) => G.links.push({ from: [a, ao], to: [b, bi] }); fn(n, w); };
+    return {
+      'One pill per call (S2 stops it)': build('One pill per call', (n, w) => {
+        const call = n('call', 20, 40), s2 = n('sensor', 20, 190, { which: 1 }), cnt = n('counter', 270, 170, { n: 1 }), run = n('latch', 520, 60), gt = n('tof', 520, 260, { ms: 600 });
+        const mo = n('motor', 790, 20, { rpm: 12 }), vb = n('vib', 790, 160), ga = n('gate', 790, 270), sf = n('safety', 790, 360), lg = n('log', 520, 400, { msg: 'pill out' });
+        w(call, 0, run, 0); w(s2, 2, cnt, 0); w(call, 0, cnt, 1); w(cnt, 1, run, 1); w(run, 0, mo, 0); w(run, 0, vb, 0); w(run, 0, gt, 0); w(gt, 0, ga, 0); w(run, 0, sf, 0); w(s2, 2, lg, 0); }),
+      'Run nonstop (motor, vibrator, gate open)': build('Run nonstop', (n, w) => { const on = n('toggle', 40, 80, { on: true }), sp = n('number', 40, 220, { v: 12 }); const mo = n('motor', 340, 40), vb = n('vib', 340, 190), ga = n('gate', 340, 300), sf = n('safety', 340, 390); w(on, 0, mo, 0); w(sp, 0, mo, 1); w(on, 0, vb, 0); w(on, 0, ga, 0); w(on, 0, sf, 0); }),
+      'Pulsed vibrator feed (oscillator)': build('Pulsed vibrator feed', (n, w) => { const call = n('call', 20, 40), s2 = n('sensor', 20, 190, { which: 1 }), run = n('latch', 280, 60), os = n('osc', 520, 160, { ms: 400, duty: 35 }); const mo = n('motor', 780, 30, { rpm: 9 }), vb = n('vib', 780, 170), ga = n('gate', 780, 290); w(call, 0, run, 0); w(s2, 2, run, 1); w(run, 0, mo, 0); w(run, 0, os, 0); w(os, 0, vb, 0); w(run, 0, ga, 0); }),
+      'Actuator test (gate blinks)': build('Actuator test', (n, w) => { const os = n('osc', 40, 80, { ms: 1500, duty: 50 }), ga = n('gate', 320, 60), sf = n('safety', 320, 160); w(os, 0, ga, 0); w(os, 0, sf, 0); }),
+      'Empty canvas': build('Untitled', () => {}),
+    };
+  }
+
+  // ---------------------------------------------------------------- compiler (sim)
+  function order() {
+    const ids = G.nodes.map(n => n.id), indeg = new Map(ids.map(i => [i, 0])), out = new Map(ids.map(i => [i, []]));
+    for (const l of G.links) if (indeg.has(l.to[0]) && out.has(l.from[0]) && l.from[0] !== l.to[0]) { indeg.set(l.to[0], indeg.get(l.to[0]) + 1); out.get(l.from[0]).push(l.to[0]); }
+    const q = ids.filter(i => indeg.get(i) === 0), res = [], seen = new Set();
+    while (q.length) { const i = q.shift(); if (seen.has(i)) continue; seen.add(i); res.push(i); for (const j of out.get(i)) { indeg.set(j, indeg.get(j) - 1); if (indeg.get(j) === 0) q.push(j); } }
+    for (const i of ids) if (!seen.has(i)) res.push(i);   // feedback loops: those read the previous tick's value
+    const byId = new Map(G.nodes.map(n => [n.id, n])); return res.map(i => byId.get(i));
+  }
+  let RT = null;   // runtime: { fn, vals, state, sig, log }
+  function compile() {
+    const seq = order(), vals = new Map(), state = new Map(), R = { vals, state, sig: {}, log: [], ticks: 0 };
+    for (const n of G.nodes) { vals.set(n.id, T[n.t].outs.map(o => o[1] === NB ? false : 0)); state.set(n.id, {}); }
+    const plan = seq.map(n => { const ty = T[n.t]; return { n, ty, src: ty.ins.map((_, ii) => { const l = linkTo(n.id, ii); return l ? [l.from[0], l.from[1]] : null; }) }; });
+    R.fn = (sim, C, dt) => {
+      const X = { t: sim.t, dt, sim, C, sig: R.sig, sigN: Object.assign({}, R.sig), L: (C.L = { motor: false, rpm: 0, dir: 1, vib: false, vibAmt: 1, gate: false, safety: false }), log: R.log, callTaken: false };
+      for (const st of plan) { const n = st.n, ty = st.ty, I = new Array(st.src.length);
+        for (let ii = 0; ii < st.src.length; ii++) { const s = st.src[ii], def = ty.ins[ii]; if (s) { const v = vals.get(s[0]); I[ii] = v ? v[s[1]] : 0; } else I[ii] = def[2] === 't' ? true : def[2] ? n.p[def[2]] : (def[1] === NB ? (ty.dflt ? true : false) : 0); }
+        const o = ty.ev(I, n.p, state.get(n.id), X); if (o.length) vals.set(n.id, o); }
+      R.sig = X.sigN; R.ticks++; if (R.log.length > 300) R.log.splice(0, R.log.length - 300);
+    };
+    return R;
+  }
+
+  // ---------------------------------------------------------------- code export
+  function exportCpp() {
+    const seq = order(), dec = [], st = [], body = [], ch = new Set();
+    for (const n of G.nodes) if (n.t === 'send' || n.t === 'recv') ch.add(cid(n.p.ch));
+    const V = (n, oi) => `n${n.id}_${oi}`;
+    for (const n of seq) { const ty = T[n.t];
+      ty.outs.forEach((o, oi) => dec.push(`${o[1] === NB ? 'bool' : 'float'} ${V(n, oi)} = 0;   // ${ty.label} #${n.id}: ${o[0]}`));
+      const s = `s${n.id}_`; if (ty.st) st.push(...ty.st(s));
+      const I = ty.ins.map((d, ii) => { const l = linkTo(n.id, ii); if (l) { const src = G.nodes.find(q => q.id === l.from[0]); if (src) return V(src, l.from[1]); }
+        return d[2] === 't' ? 'true' : d[2] ? f(n.p[d[2]]) : d[1] === NB ? (ty.dflt ? 'true' : 'false') : '0'; });
+      body.push(`  // ${ty.label} #${n.id}${ty.sub ? ' (' + ty.sub(n.p) + ')' : ''}`, ...ty.cpp(I, n.p, ty.outs.map((_, oi) => V(n, oi)), s).map(x => '  ' + x)); }
+    const c = (window.__FF && __FF.ctS && __FF.ctS()) || {}, chs = [...ch];
+    return `// FoamFeed custom logic — "${G.name}" — exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')}
+// Arduino sketch (Uno / Nano / ESP32). Needs the AccelStepper library (Library Manager). Edit the pins and the
+// hardware constants below to match your wiring. The logic runs every LOOP_MS, exactly as in the simulator.
+#include <AccelStepper.h>
+#include <Servo.h>   // ESP32: use ESP32Servo.h
+
+// ---------- wiring ----------
+const int PIN_SENSOR[3] = {2, 3, 4};      // S1 probe, S2 exit, S3 out (IR beam receivers)
+const bool SENSOR_ACTIVE_LOW = true;      // true: the receiver pulls LOW when the beam is blocked
+const int PIN_CALL = 12;                  // dispense push button (to GND, internal pull-up); the host can also send 'd' on Serial
+const int PIN_STEP = 5, PIN_DIR = 6, PIN_EN = 7;   // stepper driver (A4988 / TMC2209 in step-dir mode)
+const int PIN_VIB = 9;                    // vibrator driver (PWM)
+const int PIN_GATE = 10, PIN_SAFETY = 11; // MG90S servo gate, safety gate servo
+
+// ---------- hardware constants ----------
+const float LOOP_MS = ${f(G.loop_ms)};
+const float DT = LOOP_MS / 1000.0;
+const float MOTOR_STEPS_PER_REV = 200.0 * 16;   // 1.8 deg stepper x 16 microsteps
+const float GEAR_RATIO = 20.0;                   // worm 20:1 — the logic's rpm is the belt-drive shaft rpm
+const float RAMP_MS = ${f(c.ramp_ms ?? 20)};                      // time to reach full speed (as in the sim's ramp setting)
+const int GATE_CLOSED_DEG = 0, GATE_OPEN_DEG = 120;     // tune to the linkage
+const int SAFETY_CLOSED_DEG = 0, SAFETY_OPEN_DEG = 90;
+const unsigned long SENSOR_MIN_BLOCK_US = 1000, SENSOR_MIN_CLEAR_US = 5000;   // debounce, as the sim's sensor settings
+
+AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
+Servo gateServo, safetyServo;
+long sensorCount[3] = {0, 0, 0};
+bool sensorState[3] = {false, false, false};
+unsigned long sensorEdgeUs[3] = {0, 0, 0};
+bool callPressed = false, callBtnPrev = false;
+${chs.length ? `enum { ${chs.map(x => 'SIG_' + x).join(', ')}, SIG_N };\nfloat sig[SIG_N], sigNext[SIG_N];` : '// (no signal channels used)'}
+bool outMotor = false, outGate = false, outSafety = false; float outRpm = 0, outDir = 1, outVib = 0, motorRpm = 0;
+
+// ---------- block outputs and memory ----------
+${dec.join('\n')}
+${st.join('\n')}
+
+// debounced beam: a block must last SENSOR_MIN_BLOCK_US, a clear SENSOR_MIN_CLEAR_US; counts on each new block
+bool sensorBlocked(int k) {
+  bool raw = digitalRead(PIN_SENSOR[k]) == (SENSOR_ACTIVE_LOW ? LOW : HIGH);
+  unsigned long now = micros();
+  if (raw == sensorState[k]) sensorEdgeUs[k] = now;
+  else if (now - sensorEdgeUs[k] >= (raw ? SENSOR_MIN_BLOCK_US : SENSOR_MIN_CLEAR_US)) { sensorState[k] = raw; if (raw) sensorCount[k]++; }
+  return sensorState[k];
+}
+
+void setup() {
+  Serial.begin(115200);
+  for (int k = 0; k < 3; k++) pinMode(PIN_SENSOR[k], INPUT_PULLUP);
+  pinMode(PIN_CALL, INPUT_PULLUP); pinMode(PIN_EN, OUTPUT); digitalWrite(PIN_EN, HIGH); pinMode(PIN_VIB, OUTPUT);
+  stepper.setMaxSpeed(60.0 / 60.0 * MOTOR_STEPS_PER_REV * GEAR_RATIO);
+  gateServo.attach(PIN_GATE); safetyServo.attach(PIN_SAFETY);
+  gateServo.write(GATE_CLOSED_DEG); safetyServo.write(SAFETY_CLOSED_DEG);
+}
+
+void runLogic() {
+  outMotor = false; outRpm = 0; outDir = 1; outVib = 0; outGate = false; outSafety = false;   // safe state unless a block drives it
+${body.join('\n')}
+${chs.length ? '  for (int i = 0; i < SIG_N; i++) sig[i] = sigNext[i];' : ''}
+}
+
+void loop() {
+  static unsigned long last = 0;
+  stepper.runSpeed();                                   // keep stepping between logic ticks
+  unsigned long now = micros();
+  if (now - last < (unsigned long)(LOOP_MS * 1000)) return;
+  last += (unsigned long)(LOOP_MS * 1000);
+  bool b = digitalRead(PIN_CALL) == LOW; callPressed = b && !callBtnPrev; callBtnPrev = b;
+  if (Serial.available() && Serial.read() == 'd') callPressed = true;
+  runLogic();
+  // motor: ramp toward the target belt rpm, then step at that speed
+  float target = outMotor ? outRpm * outDir : 0, maxStep = (RAMP_MS > 0 ? fmaxf(fabsf(target), fabsf(motorRpm)) * LOOP_MS / RAMP_MS : 1e9f);
+  motorRpm += constrain(target - motorRpm, -maxStep, maxStep);
+  digitalWrite(PIN_EN, motorRpm == 0 ? HIGH : LOW);
+  stepper.setSpeed(motorRpm / 60.0 * MOTOR_STEPS_PER_REV * GEAR_RATIO);
+  analogWrite(PIN_VIB, (int)(outVib * 255));
+  gateServo.write(outGate ? GATE_OPEN_DEG : GATE_CLOSED_DEG);
+  safetyServo.write(outSafety ? SAFETY_OPEN_DEG : SAFETY_CLOSED_DEG);
+}
+`;
+  }
+  function exportJS() {
+    return `// FoamFeed custom logic "${G.name}" as a plain JavaScript tick function (same blocks and order as the editor).
+// Call tick(inputs, dt) every ${G.loop_ms} ms. inputs = { sensors: [{ blocked, count } x3], call: bool, t: seconds }.
+// Returns { motor, rpm, dir, vib, vibAmt, gate, safety }.
+const GRAPH = ${JSON.stringify(save(), null, 1)};
+// Load GRAPH into the FoamFeed logic editor (Import) to edit it again.
+`;
+  }
+  const save = () => ({ format: 'foamfeed-logic', v: 1, name: G.name, loop_ms: G.loop_ms, nid: G.nid, nodes: G.nodes.map(n => ({ id: n.id, t: n.t, x: Math.round(n.x), y: Math.round(n.y), p: n.p })), links: G.links });
+  function load(o) {
+    if (!o || !Array.isArray(o.nodes)) throw new Error('not a FoamFeed logic file');
+    const nodes = o.nodes.filter(n => T[n.t]).map(n => ({ id: +n.id, t: n.t, x: +n.x || 0, y: +n.y || 0, p: Object.assign(pdef(n.t), n.p || {}) })), ids = new Set(nodes.map(n => n.id));
+    G = { name: o.name || 'Imported', loop_ms: +o.loop_ms || 1, nodes, links: (o.links || []).filter(l => ids.has(l.from[0]) && ids.has(l.to[0])), nid: Math.max(+o.nid || 1, ...nodes.map(n => n.id + 1), 1) };
+  }
+
+  // ---------------------------------------------------------------- attach to the sim
+  let attachedFn = null;
+  function attach() {
+    const sim = window.__FF && __FF.sim; if (!sim || !sim.ctrl) return;
+    RT = compile(); attachedFn = RT.fn; sim.ctrl.logicFn = attachedFn; sim.ctrl.loop_ms = G.loop_ms; sim.ctrl.lT = null;
+  }
+  function persist() { try { localStorage.setItem(KEY_CUR, JSON.stringify(save())); } catch (e) {} }
+  function changed(structural) { persist(); if (structural) { const sim = window.__FF && __FF.sim; if (sim && sim.ctrl && sim.ctrl.mode === 'logic') attach(); } if (UI.open) draw(); }
+
+  // ---------------------------------------------------------------- UI
+  const css = `
+#lgWrap{position:fixed;inset:0;z-index:60;background:#0f1217;display:none;flex-direction:column;color:#d6dde8;font:12px/1.35 system-ui,Segoe UI,Roboto,sans-serif}
+#lgWrap.open{display:flex}
+#lgTop{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:6px 8px;background:#171b22;border-bottom:1px solid #2a303b}
+#lgTop .ttl{font-weight:700;color:#7fb2ff;letter-spacing:.06em;text-transform:uppercase;font-size:11px;margin-right:4px}
+#lgTop input[type=text]{background:#12151a;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:4px 6px;font:inherit;width:150px}
+#lgTop select{width:auto;max-width:210px}
+#lgTop .sp{flex:1}
+#lgRun.on{background:#1d6b3a;border-color:#2fa35a}
+#lgStat{padding:3px 10px;background:#141820;border-bottom:1px solid #2a303b;color:#8c98ab;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lgStat b{color:#e8eefc;font-weight:600}#lgStat .e{color:#ff8080}
+#lgMain{flex:1;display:flex;min-height:0;position:relative}
+#lgPal{width:190px;flex:0 0 190px;overflow-y:auto;background:#151920;border-right:1px solid #2a303b;padding:6px}
+#lgPal h4{margin:8px 2px 4px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#8c98ab;display:flex;align-items:center;gap:6px}
+#lgPal h4 i{width:8px;height:8px;border-radius:2px;display:inline-block}
+#lgPal button{display:block;width:100%;text-align:left;margin:2px 0;padding:6px 8px;background:#1d232d;border:1px solid #2c3441;border-left-width:3px}
+#lgPal button:hover{background:#252d3a}
+#lgPal input{width:100%;background:#12151a;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:5px 7px;font:inherit;margin-bottom:4px}
+#lgCv{flex:1;position:relative;overflow:hidden;touch-action:none;background-color:#0f1217;background-image:radial-gradient(#242b36 1px,transparent 1px);background-size:20px 20px;cursor:grab}
+#lgCv.pan{cursor:grabbing}
+#lgW{position:absolute;left:0;top:0;transform-origin:0 0}
+#lgSvg{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+#lgSvg path{fill:none;stroke:#4a5668;stroke-width:2.5;pointer-events:stroke;cursor:pointer}
+#lgSvg path.on{stroke:#ffcf4a}#lgSvg path.num{stroke:#5f8fd0}#lgSvg path.sel{stroke:#ff6b6b;stroke-width:4}#lgSvg path.tmp{stroke:#9fd0ff;stroke-dasharray:6 4;pointer-events:none}
+.lgN{position:absolute;min-width:150px;background:#1b212b;border:1px solid #333c4a;border-radius:8px;box-shadow:0 4px 14px #0007;user-select:none;-webkit-user-select:none}
+.lgN.sel{border-color:#7fb2ff;box-shadow:0 0 0 2px #7fb2ff55,0 4px 14px #0007}
+.lgN .hd{padding:5px 8px 4px;border-radius:7px 7px 0 0;cursor:move;border-top:3px solid var(--c);background:#212834;display:flex;gap:6px;align-items:baseline;touch-action:none}
+.lgN .hd b{font-weight:600;color:#eef3fb;white-space:nowrap}.lgN .hd small{color:#9fb0c8;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:right}
+.lgN .bd{display:flex;justify-content:space-between;gap:10px;padding:4px 0 6px}
+.lgN .col{display:flex;flex-direction:column;gap:3px}
+.lgN .pt{display:flex;align-items:center;gap:5px;height:18px;font-size:11px;color:#aab4c4;white-space:nowrap}
+.lgN .pt.o{justify-content:flex-end}
+.lgN .dot{width:13px;height:13px;border-radius:50%;border:2px solid #6b7a90;background:#12151a;flex:0 0 13px;cursor:crosshair;touch-action:none}
+.lgN .pt.i .dot{margin-left:-7px}.lgN .pt.o .dot{margin-right:-7px}
+.lgN .dot.n{border-radius:3px}.lgN .dot.on{background:#ffcf4a;border-color:#ffcf4a}.lgN .dot.pend{box-shadow:0 0 0 4px #7fb2ff88}
+.lgN .lv{color:#e8eefc;font-variant-numeric:tabular-nums;font-size:10.5px;min-width:24px;text-align:right}
+.lgN .big{font-size:20px;font-weight:700;text-align:center;color:#ffcf4a;padding:2px 10px 6px;font-variant-numeric:tabular-nums}
+.lgN.act .hd{background:#2a2120}
+#lgIns{width:270px;flex:0 0 270px;overflow-y:auto;background:#151920;border-left:1px solid #2a303b;padding:8px 10px}
+#lgIns h3{margin:2px 0 4px;font-size:13px;color:#eef3fb}#lgIns p{color:#8c98ab;margin:3px 0 8px}
+#lgIns .r{display:grid;grid-template-columns:84px 1fr 64px;gap:6px;align-items:center;margin:6px 0}
+#lgIns .r label{color:#aab4c4}#lgIns input[type=number],#lgIns input[type=text]{width:100%;background:#12151a;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:4px 5px;font:inherit}
+#lgIns input[type=range]{width:100%}
+#lgIns .lv{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:6px 0}#lgIns .lv span{text-align:right;color:#ffcf4a;font-variant-numeric:tabular-nums}
+#lgLog{font:11px ui-monospace,Consolas,monospace;color:#9fb0c8;max-height:180px;overflow:auto;background:#0f1217;border:1px solid #2a303b;border-radius:4px;padding:4px 6px;white-space:pre-wrap}
+#lgDlg{position:fixed;inset:0;z-index:70;background:#000a;display:none;align-items:center;justify-content:center}
+#lgDlg.open{display:flex}#lgDlg>div{width:min(900px,94vw);height:min(80vh,760px);background:#171b22;border:1px solid #38414f;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px}
+#lgDlg textarea{flex:1;width:100%;background:#0f1217;color:#d6e2f3;border:1px solid #2a303b;border-radius:4px;font:11.5px/1.4 ui-monospace,Consolas,monospace;padding:8px;resize:none;white-space:pre}
+#lgFab{display:none}
+@media (max-width:820px){
+ #lgTop{font-size:13px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}#lgTop>*{flex:0 0 auto}#lgTop .ttl,#lgTop .sp{display:none}#lgTop input[type=text]{width:110px}
+ #lgPal{position:absolute;left:0;top:0;bottom:0;z-index:3;width:80vw;max-width:300px;transform:translateX(-102%);transition:transform .18s;box-shadow:4px 0 18px #000a}
+ #lgPal.show{transform:none}#lgPal button{padding:10px 10px;font-size:14px}
+ #lgIns{position:absolute;left:0;right:0;bottom:0;z-index:3;width:auto;max-height:46vh;border-left:0;border-top:1px solid #38414f;box-shadow:0 -6px 18px #000a;display:none;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+ #lgIns.show{display:block}
+ #lgFab{display:block;position:absolute;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:2;width:54px;height:54px;border-radius:50%;font-size:26px;background:#1f4f9c;border-color:#3b79d6;box-shadow:0 4px 14px #000a}
+ .lgN .dot{width:18px;height:18px;flex-basis:18px}.lgN .pt{height:24px}
+}`;
+  const UI = { open: false, sel: null, selLink: null, pan: [40, 30], z: 1, pend: null, hist: [], fut: [] };
+  const el = (tag, attrs, html) => { const e = document.createElement(tag); if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (html != null) e.innerHTML = html; return e; };
+  const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  let wrap, cv, world, svg, pal, ins, stat;
+  function buildUI() {
+    document.head.appendChild(el('style', null, css));
+    wrap = el('div', { id: 'lgWrap' }); document.body.appendChild(wrap);
+    wrap.innerHTML = `<div id="lgTop"><span class="ttl">🧩 Logic editor</span><button id="lgPalB" title="add a block">＋ Blocks</button>
+<input type="text" id="lgName" title="name of this logic"><button id="lgRun" title="run this logic as the machine's controller (Dispense control mode: Custom logic)">▶ Use on machine</button>
+<button id="lgCall" title="press the dispense button (the 'Dispense button' block pulses)">⏵ Dispense call</button>
+<label title="how often the controller loop runs (sim time)" style="color:#aab4c4">Loop <input type="number" id="lgLoop" min="0.1" max="100" step="0.1" style="width:56px;background:#12151a;color:#e6ecf7;border:1px solid #38414f;border-radius:4px;padding:3px 4px"> ms</label>
+<select id="lgTpl"><option value="">Start from…</option></select><button id="lgUndo" title="undo (Ctrl+Z)">↶</button><button id="lgRedo" title="redo (Ctrl+Y)">↷</button><button id="lgFit" title="fit the graph in view">⤢ Fit</button>
+<select id="lgLib" title="your saved logic (this browser)"><option value="">Saved logic…</option></select><button id="lgSave" title="save this logic under its name">💾 Save</button>
+<button id="lgImp" title="load a .json logic file">⇪ Import</button><button id="lgExp" class="pri" title="export the finished logic as an Arduino sketch, JavaScript or JSON">⇩ Export code</button>
+<span class="sp"></span><button id="lgClose" title="back to the simulator (the logic keeps running)">✕ Close</button></div>
+<div id="lgStat"></div><div id="lgMain"><div id="lgPal"></div><div id="lgCv"><div id="lgW"><svg id="lgSvg"></svg></div><button id="lgFab" title="add a block">＋</button></div><div id="lgIns"></div></div>`;
+    document.body.appendChild(el('div', { id: 'lgDlg' }, `<div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="color:#7fb2ff">Export</b><select id="lgFmt" style="width:auto"><option value="cpp">Arduino C++ sketch (.ino)</option><option value="json">Logic file (.json, re-importable)</option><option value="js">JavaScript (graph)</option></select><span style="flex:1"></span><button id="lgCopy">⧉ Copy</button><button id="lgDl" class="pri">⇩ Download</button><button id="lgDlgX">✕</button></div><textarea id="lgCode" spellcheck="false" readonly></textarea><small class="note">The sketch reproduces the graph block for block. Set your pins and the servo angles at the top before uploading.</small></div>`));
+    cv = wrap.querySelector('#lgCv'); world = wrap.querySelector('#lgW'); svg = wrap.querySelector('#lgSvg'); pal = wrap.querySelector('#lgPal'); ins = wrap.querySelector('#lgIns'); stat = wrap.querySelector('#lgStat');
+    // palette
+    let ph = '<input type="search" id="lgFind" placeholder="Find a block…">';
+    for (const [ck, [cn, col]] of Object.entries(CATS)) { ph += `<h4><i style="background:${col}"></i>${cn}</h4>`; for (const [t, ty] of Object.entries(T)) if (ty.cat === ck) ph += `<button data-t="${t}" style="border-left-color:${col}" title="${esc(ty.help)}">${esc(ty.label)}</button>`; }
+    pal.innerHTML = ph;
+    pal.addEventListener('click', e => { const b = e.target.closest('button[data-t]'); if (!b) return; addNode(b.dataset.t); if (matchMedia('(max-width:820px)').matches) pal.classList.remove('show'); });
+    pal.querySelector('#lgFind').addEventListener('input', e => { const q = e.target.value.toLowerCase(); for (const b of pal.querySelectorAll('button[data-t]')) b.style.display = !q || b.textContent.toLowerCase().includes(q) || T[b.dataset.t].help.toLowerCase().includes(q) ? '' : 'none'; });
+    const $w = id => document.getElementById(id);
+    $w('lgPalB').onclick = $w('lgFab').onclick = () => pal.classList.toggle('show');
+    $w('lgClose').onclick = () => close();
+    $w('lgName').oninput = e => { G.name = e.target.value; persist(); };
+    $w('lgLoop').onchange = e => { snap(); G.loop_ms = Math.max(0.1, Math.min(100, +e.target.value || 1)); e.target.value = G.loop_ms; changed(true); };
+    $w('lgRun').onclick = () => { const c = __FF.ctS(); if (c.mode === 'logic') { c.mode = 'feed'; } else { c.mode = 'logic'; } __FF.applyCtrl(); __FF.syncCtrlUI(); if (c.mode === 'logic') attach(); topUI(); };
+    $w('lgCall').onclick = () => { const c = __FF.ctS(); if (c.mode !== 'logic') { c.mode = 'logic'; __FF.applyCtrl(); __FF.syncCtrlUI(); attach(); } __FF.feedReq(1); topUI(); };
+    const tpl = TEMPLATES(); $w('lgTpl').innerHTML += Object.keys(tpl).map(k => `<option>${esc(k)}</option>`).join('');
+    $w('lgTpl').onchange = e => { const k = e.target.value; e.target.value = ''; if (!tpl[k]) return; if (G.nodes.length && !confirm('Replace the current graph with "' + k + '"? (Undo can bring it back.)')) return; snap(); tpl[k](); UI.sel = null; changed(true); fit(); topUI(); };
+    $w('lgUndo').onclick = undo; $w('lgRedo').onclick = redo; $w('lgFit').onclick = fit;
+    $w('lgSave').onclick = () => { const lib = libGet(), nm = (prompt('Save this logic as:', G.name) || '').trim(); if (!nm) return; G.name = nm; lib[nm] = save(); libSet(lib); topUI(); };
+    $w('lgLib').onchange = e => { const nm = e.target.value; e.target.value = ''; if (!nm) return; const lib = libGet();
+      if (nm.startsWith('✕ ')) { const k = nm.slice(2); if (confirm(`Delete saved logic "${k}"?`)) { delete lib[k]; libSet(lib); topUI(); } return; }
+      if (!lib[nm]) return; snap(); load(lib[nm]); UI.sel = null; changed(true); fit(); topUI(); };
+    $w('lgImp').onclick = () => { const i = el('input', { type: 'file', accept: '.json,application/json' }); i.onchange = async () => { const fl = i.files[0]; if (!fl) return; try { const o = JSON.parse(await fl.text()); snap(); load(o.nodes ? o : o.GRAPH || o); UI.sel = null; changed(true); fit(); topUI(); } catch (err) { alert('Could not read that file: ' + err.message); } }; i.click(); };
+    const dlg = document.getElementById('lgDlg'), fmt = document.getElementById('lgFmt'), code = document.getElementById('lgCode');
+    const gen = () => { code.value = fmt.value === 'cpp' ? exportCpp() : fmt.value === 'js' ? exportJS() : JSON.stringify(save(), null, 1); };
+    $w('lgExp').onclick = () => { gen(); dlg.classList.add('open'); }; fmt.onchange = gen; $w('lgDlgX').onclick = () => dlg.classList.remove('open');
+    dlg.addEventListener('click', e => { if (e.target === dlg) dlg.classList.remove('open'); });
+    $w('lgCopy').onclick = async () => { try { await navigator.clipboard.writeText(code.value); $w('lgCopy').textContent = '✓ Copied'; } catch (e) { code.select(); document.execCommand('copy'); } setTimeout(() => $w('lgCopy').textContent = '⧉ Copy', 1200); };
+    $w('lgDl').onclick = () => { const ext = { cpp: 'ino', json: 'json', js: 'js' }[fmt.value], nm = (G.name || 'logic').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'logic';
+      const a = el('a', { download: nm + '.' + ext, href: URL.createObjectURL(new Blob([code.value], { type: 'text/plain' })) }); document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); };
+    canvasEvents();
+    document.addEventListener('keydown', e => { if (!UI.open || /INPUT|TEXTAREA|SELECT/.test(document.activeElement && document.activeElement.tagName)) return;
+      if ((e.key === 'Delete' || e.key === 'Backspace') && (UI.sel || UI.selLink)) { e.preventDefault(); delSel(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && UI.sel) { e.preventDefault(); dup(); }
+      else if (e.key === 'Escape') { UI.pend = null; UI.sel = null; UI.selLink = null; draw(); } });
+  }
+  const libGet = () => { try { return JSON.parse(localStorage.getItem(KEY_LIB) || '{}') || {}; } catch (e) { return {}; } };
+  const libSet = o => { try { localStorage.setItem(KEY_LIB, JSON.stringify(o)); } catch (e) { alert('Could not save (browser storage full or blocked).'); } };
+  function topUI() {
+    const c = window.__FF && __FF.ctS ? __FF.ctS() : {}, on = c.mode === 'logic', r = document.getElementById('lgRun');
+    r.classList.toggle('on', on); r.textContent = on ? '■ Running on machine — stop' : '▶ Use on machine';
+    document.getElementById('lgName').value = G.name; document.getElementById('lgLoop').value = G.loop_ms;
+    const lib = libGet(), ks = Object.keys(lib);
+    document.getElementById('lgLib').innerHTML = '<option value="">Saved logic…</option>' + ks.map(k => `<option>${esc(k)}</option>`).join('') + (ks.length ? '<option disabled>──────────</option>' + ks.map(k => `<option value="✕ ${esc(k)}">✕ delete “${esc(k)}”</option>`).join('') : '');
+  }
+  function snap() { UI.hist.push(JSON.stringify(save())); if (UI.hist.length > 80) UI.hist.shift(); UI.fut.length = 0; }
+  function undo() { if (!UI.hist.length) return; UI.fut.push(JSON.stringify(save())); load(JSON.parse(UI.hist.pop())); UI.sel = null; changed(true); topUI(); }
+  function redo() { if (!UI.fut.length) return; UI.hist.push(JSON.stringify(save())); load(JSON.parse(UI.fut.pop())); UI.sel = null; changed(true); topUI(); }
+  function viewCenter() { const r = cv.getBoundingClientRect(); return [(r.width / 2 - UI.pan[0]) / UI.z, (r.height / 2 - UI.pan[1]) / UI.z]; }
+  function addNode(t) { snap(); const [cx, cy] = viewCenter(), k = G.nodes.length % 6; const n = mk(t, cx - 80 + k * 18, cy - 40 + k * 18); G.nodes.push(n); UI.sel = n.id; UI.selLink = null; changed(true); showIns(); }
+  function dup() { const n = G.nodes.find(q => q.id === UI.sel); if (!n) return; snap(); const m = mk(n.t, n.x + 30, n.y + 30, JSON.parse(JSON.stringify(n.p))); G.nodes.push(m); UI.sel = m.id; changed(true); }
+  function delSel() { snap(); if (UI.selLink) { G.links = G.links.filter(l => l !== UI.selLink); UI.selLink = null; }
+    else if (UI.sel != null) { const id = UI.sel; G.nodes = G.nodes.filter(n => n.id !== id); G.links = G.links.filter(l => l.from[0] !== id && l.to[0] !== id); UI.sel = null; } changed(true); showIns(); }
+  function connect(from, to) {
+    if (from[0] === to[0]) return; snap(); G.links = G.links.filter(l => !(l.to[0] === to[0] && l.to[1] === to[1])); G.links.push({ from, to }); changed(true);
+  }
+  const applyView = () => { world.style.transform = `translate(${UI.pan[0]}px,${UI.pan[1]}px) scale(${UI.z})`; };
+  function fit() { if (!G.nodes.length) { UI.pan = [40, 30]; UI.z = 1; applyView(); return; }
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const n of G.nodes) { const d = world.querySelector(`.lgN[data-id="${n.id}"]`), w = d ? d.offsetWidth : 160, h = d ? d.offsetHeight : 90; x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + w); y1 = Math.max(y1, n.y + h); }
+    const r = cv.getBoundingClientRect(), z = Math.max(0.3, Math.min(1.2, Math.min((r.width - 60) / (x1 - x0), (r.height - 60) / (y1 - y0)))); UI.z = z; UI.pan = [(r.width - (x1 - x0) * z) / 2 - x0 * z, (r.height - (y1 - y0) * z) / 2 - y0 * z]; applyView(); wires(); }
+  const fmtV = v => typeof v === 'boolean' ? (v ? 'ON' : 'off') : Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : (+v).toFixed(2);
+  function draw() {
+    for (const d of world.querySelectorAll('.lgN')) d.remove();
+    for (const n of G.nodes) { const ty = T[n.t], col = CATS[ty.cat][1], d = el('div', { class: 'lgN' + (UI.sel === n.id ? ' sel' : '') + (ACTIONS.has(n.t) ? ' act' : ''), 'data-id': n.id });
+      d.style.cssText = `left:${n.x}px;top:${n.y}px;--c:${col}`;
+      let h = `<div class="hd"><b>${esc(ty.label)}</b><small>${ty.sub ? esc(ty.sub(n.p)) : ''}</small></div>`;
+      if (n.t === 'watch') h += '<div class="big" data-w="1">—</div>';
+      h += '<div class="bd"><div class="col">' + ty.ins.map((p, ii) => { const l = linkTo(n.id, ii), dv = !l && p[2] && p[2] !== 't' ? ` <span style="color:#6c7a90">${esc(n.p[p[2]])}</span>` : ''; return `<div class="pt i"><span class="dot ${p[1] === NN ? 'n' : ''}" data-k="i" data-n="${n.id}" data-p="${ii}"></span>${esc(p[0])}${dv}</div>`; }).join('') + '</div>';
+      h += '<div class="col">' + ty.outs.map((p, oi) => `<div class="pt o"><span class="lv" data-v="${oi}"></span>${esc(p[0])}<span class="dot ${p[1] === NN ? 'n' : ''}" data-k="o" data-n="${n.id}" data-p="${oi}"></span></div>`).join('') + '</div></div>';
+      d.innerHTML = h; world.appendChild(d); }
+    if (UI.pend) { const dd = world.querySelector(`.dot[data-k="${UI.pend.k}"][data-n="${UI.pend.n}"][data-p="${UI.pend.p}"]`); if (dd) dd.classList.add('pend'); }
+    applyView(); wires(); live();
+  }
+  function portXY(k, nid, p) { const d = world.querySelector(`.dot[data-k="${k}"][data-n="${nid}"][data-p="${p}"]`); if (!d) return null; const a = d.getBoundingClientRect(), r = cv.getBoundingClientRect();
+    return [(a.left + a.width / 2 - r.left - UI.pan[0]) / UI.z, (a.top + a.height / 2 - r.top - UI.pan[1]) / UI.z]; }
+  const curve = (a, b) => { const dx = Math.max(40, Math.abs(b[0] - a[0]) * 0.5); return `M${a[0]},${a[1]} C${a[0] + dx},${a[1]} ${b[0] - dx},${b[1]} ${b[0]},${b[1]}`; };
+  function wires() {
+    let h = ''; G.links.forEach((l, i) => { const a = portXY('o', l.from[0], l.from[1]), b = portXY('i', l.to[0], l.to[1]); if (!a || !b) return; const src = G.nodes.find(n => n.id === l.from[0]), num = src && T[src.t].outs[l.from[1]] && T[src.t].outs[l.from[1]][1] === NN;
+      h += `<path data-l="${i}" class="${num ? 'num' : ''}${UI.selLink === l ? ' sel' : ''}" d="${curve(a, b)}"/>`; });
+    if (UI.drag && UI.drag.wire) h += `<path class="tmp" d="${curve(UI.drag.a, UI.drag.b)}"/>`;
+    svg.innerHTML = h;
+  }
+  function live() {
+    if (!UI.open) return; const R = RT, c = window.__FF && __FF.ctS ? __FF.ctS() : {}, sim = window.__FF && __FF.sim, C = sim && sim.ctrl, running = c.mode === 'logic' && R && C && C.logicFn === R.fn;
+    for (const n of G.nodes) { const d = world.querySelector(`.lgN[data-id="${n.id}"]`); if (!d) continue; const v = running ? R.vals.get(n.id) : null;
+      for (const s of d.querySelectorAll('.lv')) { const x = v ? v[+s.dataset.v] : null; s.textContent = x == null ? '' : fmtV(x); }
+      for (const s of d.querySelectorAll('.dot[data-k="o"]')) s.classList.toggle('on', !!(v && v[+s.dataset.p] === true));
+      if (n.t === 'watch') { const st = running ? R.state.get(n.id) : null, w = d.querySelector('[data-w]'); if (w) w.textContent = st && st.v != null ? fmtV(st.v) : '—'; } }
+    for (const p of svg.querySelectorAll('path[data-l]')) { const l = G.links[+p.dataset.l], v = running && l ? R.vals.get(l.from[0]) : null, x = v ? v[l.from[1]] : null; p.classList.toggle('on', x === true || (typeof x === 'number' && x !== 0 && !p.classList.contains('num'))); }
+    const L = C && C.L, g = sim && sim.gate, sf = sim && sim.safety;
+    stat.innerHTML = running ? `<b>Running on the machine</b> · loop ${G.loop_ms} ms · t ${sim.t.toFixed(2)} s · motor <b>${L && L.motor ? (L.dir < 0 ? '◀ ' : '') + (+L.rpm).toFixed(1) + ' rpm' : 'off'}</b> (belt ${(+sim.P.rpm).toFixed(1)}) · vibrator <b>${L && L.vib ? Math.round((L.vibAmt ?? 1) * 100) + '%' : 'off'}</b> · gate <b>${L && L.gate ? 'open' : 'closed'}</b>${g ? ' (' + (g.off * 1e3).toFixed(1) + ' mm)' : ''} · safety <b>${L && L.safety ? 'open' : 'closed'}</b>${sf ? ' (' + (sf.off * 1e3).toFixed(1) + ' mm)' : ''} · S1/S2/S3 <b>${C.sensors.map(x => x.count).join(' / ')}</b> · out <b>${sim.stats.dispensed}</b>${C.logicErr ? ` · <span class="e">error: ${esc(C.logicErr)}</span>` : ''}${C.Lcall ? ` · ${C.Lcall} call(s) waiting` : ''}`
+      : `Editing — not driving the machine. Press <b>▶ Use on machine</b> to run this logic as the controller (live values then show on every port). ${G.nodes.length} blocks, ${G.links.length} wires.`;
+    if (UI.sel != null) { const box = ins.querySelector('.lv'), v = running ? R.vals.get(UI.sel) : null, n = G.nodes.find(q => q.id === UI.sel); if (box && n) box.innerHTML = T[n.t].outs.map((o, oi) => `<b>${esc(o[0])}</b><span>${v ? fmtV(v[oi]) : '—'}</span>`).join('') || '<b>(no outputs)</b><span></span>'; }
+    const lg = document.getElementById('lgLog'); if (lg && R) { const t = R.log.slice(-60).map(([t, m]) => `${t.toFixed(3)} s  ${m}`).join('\n') || '(nothing logged yet)'; if (lg.textContent !== t) { lg.textContent = t; lg.scrollTop = 1e9; } }
+  }
+  function showIns() {
+    const n = G.nodes.find(q => q.id === UI.sel);
+    if (!n) { ins.classList.remove('show'); ins.innerHTML = `<h3>Logic editor</h3><p>Add blocks from the left (＋ on a phone), then drag from an output dot (right side of a block) to an input dot (left side). On touch screens you can also tap an output, then tap an input.</p>
+<p><b style="color:#ffcf4a">Yellow</b> wires are on/true; blue wires carry numbers. Drag the background to pan, scroll or pinch to zoom. Select a wire and press Delete (or the button below) to remove it; drag a connected input away to re-route it.</p>
+<p>Unconnected inputs use the block's own setting. Actions you don't use stay off (safe state).</p>${UI.selLink ? '<div class="btns"><button id="lgDelL">✕ Delete selected wire</button></div>' : ''}<h3 style="margin-top:12px">Log</h3><div id="lgLog"></div>`;
+      const b = document.getElementById('lgDelL'); if (b) b.onclick = delSel; if (UI.selLink) ins.classList.add('show'); live(); return; }
+    const ty = T[n.t]; let h = `<h3>${esc(ty.label)} <small style="color:#6c7a90">#${n.id}</small></h3><p>${esc(ty.help)}</p>`;
+    for (const q of ty.p) { const v = n.p[q.k];
+      if (q.type === 'num') h += `<div class="r"><label>${esc(q.l)}${q.unit ? ' (' + q.unit + ')' : ''}</label><input type="range" data-k="${q.k}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}"><input type="number" data-k="${q.k}" step="${q.step}" value="${v}"></div>`;
+      else if (q.type === 'sel') h += `<div class="r"><label>${esc(q.l)}</label><select data-k="${q.k}" style="grid-column:2/4">${q.opts.map(([lab, val]) => `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(lab)}</option>`).join('')}</select></div>`;
+      else if (q.type === 'bool') h += `<div class="r"><label>${esc(q.l)}</label><input type="checkbox" data-k="${q.k}"${v ? ' checked' : ''} style="justify-self:start;width:22px;height:22px"></div>`;
+      else h += `<div class="r"><label>${esc(q.l)}</label><input type="text" data-k="${q.k}" value="${esc(v)}" style="grid-column:2/4"></div>`; }
+    h += `<div class="lv"></div><div class="btns"><button id="lgDup">⧉ Duplicate</button><button id="lgDel">✕ Delete block</button><button id="lgDone" style="display:none">Done</button></div>`;
+    ins.innerHTML = h; ins.classList.add('show');
+    if (matchMedia('(max-width:820px)').matches) document.getElementById('lgDone').style.display = '';
+    const setP = (k, raw) => { const q = ty.p.find(x => x.k === k); let v = raw; if (q.type === 'num') { v = +raw; if (!isFinite(v)) return; } else if (q.type === 'sel') v = typeof q.def === 'number' ? +raw : raw; else if (q.type === 'bool') v = !!raw;
+      n.p[k] = v; for (const e of ins.querySelectorAll(`[data-k="${k}"]`)) if (e.type !== 'checkbox' && e !== document.activeElement) e.value = v;
+      const d = world.querySelector(`.lgN[data-id="${n.id}"] .hd small`); if (d && ty.sub) d.textContent = ty.sub(n.p); persist(); if (q.type !== 'num' || k !== 'v') draw(); };
+    for (const e of ins.querySelectorAll('[data-k]')) { e.addEventListener('pointerdown', () => snap(), { once: true }); e.addEventListener(e.type === 'checkbox' || e.tagName === 'SELECT' ? 'change' : 'input', () => setP(e.dataset.k, e.type === 'checkbox' ? e.checked : e.value)); }
+    document.getElementById('lgDup').onclick = dup; document.getElementById('lgDel').onclick = delSel; document.getElementById('lgDone').onclick = () => { UI.sel = null; draw(); showIns(); };
+    live();
+  }
+  function canvasEvents() {
+    const P = new Map(); let pinch = null;
+    const toW = (cx, cy) => { const r = cv.getBoundingClientRect(); return [(cx - r.left - UI.pan[0]) / UI.z, (cy - r.top - UI.pan[1]) / UI.z]; };
+    cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, z0 = UI.z, z = Math.max(0.25, Math.min(2.5, z0 * Math.exp(-e.deltaY * 0.0015)));
+      UI.pan = [mx - (mx - UI.pan[0]) * z / z0, my - (my - UI.pan[1]) * z / z0]; UI.z = z; applyView(); }, { passive: false });
+    cv.addEventListener('pointerdown', e => {
+      if (e.target.closest('#lgFab')) return;
+      P.set(e.pointerId, [e.clientX, e.clientY]);
+      if (P.size === 2) { const [a, b] = [...P.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: UI.z, pan: UI.pan.slice(), c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; UI.drag = null; return; }
+      const dot = e.target.closest('.dot'), hd = e.target.closest('.hd'), node = e.target.closest('.lgN'), path = e.target.closest('path[data-l]');
+      try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+      if (dot) { const k = dot.dataset.k, nid = +dot.dataset.n, p = +dot.dataset.p; e.stopPropagation();
+        if (k === 'o') UI.drag = { wire: true, from: [nid, p], a: portXY('o', nid, p), b: toW(e.clientX, e.clientY), x0: e.clientX, y0: e.clientY, moved: false, tap: { k, n: nid, p } };
+        else { const l = linkTo(nid, p);
+          if (UI.pend && UI.pend.k === 'o') { connect([UI.pend.n, UI.pend.p], [nid, p]); UI.pend = null; UI.drag = null; draw(); return; }
+          if (l) { snap(); G.links = G.links.filter(q => q !== l); UI.drag = { wire: true, from: l.from, a: portXY('o', l.from[0], l.from[1]), b: toW(e.clientX, e.clientY), x0: e.clientX, y0: e.clientY, moved: true, detached: true }; changed(true); }
+          else UI.drag = { tapIn: { n: nid, p }, x0: e.clientX, y0: e.clientY }; }
+        return; }
+      if (path) { UI.selLink = G.links[+path.dataset.l]; UI.sel = null; UI.drag = null; draw(); showIns(); return; }
+      if (node) { const id = +node.dataset.id; if (UI.sel !== id) { UI.sel = id; UI.selLink = null; draw(); showIns(); }
+        if (hd || !e.target.closest('input,select,button')) { const n = G.nodes.find(q => q.id === id); UI.drag = { node: n, ox: n.x, oy: n.y, x0: e.clientX, y0: e.clientY, moved: false }; } return; }
+      UI.drag = { pan: true, px: UI.pan[0], py: UI.pan[1], x0: e.clientX, y0: e.clientY, moved: false }; cv.classList.add('pan');
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!P.has(e.pointerId)) return; P.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pinch && P.size >= 2) { const [a, b] = [...P.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), z = Math.max(0.25, Math.min(2.5, pinch.z * d / pinch.d)), r = cv.getBoundingClientRect(), cx = pinch.c[0] - r.left, cy = pinch.c[1] - r.top, mx = (a[0] + b[0]) / 2 - r.left, my = (a[1] + b[1]) / 2 - r.top;
+        UI.pan = [mx - (cx - pinch.pan[0]) * z / pinch.z, my - (cy - pinch.pan[1]) * z / pinch.z]; UI.z = z; applyView(); return; }
+      const D = UI.drag; if (!D) return; const dx = e.clientX - D.x0, dy = e.clientY - D.y0; if (Math.hypot(dx, dy) > 4) D.moved = true;
+      if (D.pan) { UI.pan = [D.px + dx, D.py + dy]; applyView(); }
+      else if (D.node && D.moved) { if (!D.snapped) { snap(); D.snapped = true; } D.node.x = D.ox + dx / UI.z; D.node.y = D.oy + dy / UI.z; const d = world.querySelector(`.lgN[data-id="${D.node.id}"]`); if (d) { d.style.left = D.node.x + 'px'; d.style.top = D.node.y + 'px'; } wires(); }
+      else if (D.wire) { D.b = toW(e.clientX, e.clientY); wires(); }
+    });
+    const end = e => {
+      P.delete(e.pointerId); if (P.size < 2) pinch = null; cv.classList.remove('pan'); const D = UI.drag; UI.drag = null; if (!D) return;
+      if (D.wire) {
+        if (D.moved) { const t = document.elementFromPoint(e.clientX, e.clientY); let dot = t && t.closest && t.closest('.dot[data-k="i"]');
+          if (!dot) { let best = 24; for (const d of world.querySelectorAll('.dot[data-k="i"]')) { const r = d.getBoundingClientRect(), dd = Math.hypot(r.left + r.width / 2 - e.clientX, r.top + r.height / 2 - e.clientY); if (dd < best) { best = dd; dot = d; } } }   // snap to the nearest input
+          if (dot && +dot.dataset.n !== D.from[0]) connect(D.from, [+dot.dataset.n, +dot.dataset.p]); UI.pend = null; }
+        else if (D.tap) UI.pend = UI.pend && UI.pend.n === D.tap.n && UI.pend.p === D.tap.p ? null : D.tap;   // tap an output, then tap an input
+        draw(); return; }
+      if (D.tapIn) { draw(); return; }
+      if (D.node) { if (D.moved) persist(); return; }
+      if (D.pan && !D.moved) { UI.sel = null; UI.selLink = null; UI.pend = null; draw(); showIns(); }
+    };
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  }
+  function open() { if (!wrap) buildUI(); UI.open = true; wrap.classList.add('open'); topUI(); draw(); showIns(); if (!UI.fitted) { UI.fitted = true; requestAnimationFrame(fit); } }
+  function close() { UI.open = false; wrap.classList.remove('open'); }
+  // keep the controller attached (the sim is rebuilt on refill / pill change) and the live view fresh
+  setInterval(() => { const sim = window.__FF && __FF.sim, c = window.__FF && __FF.ctS ? __FF.ctS() : null;
+    if (sim && sim.ctrl && c && c.mode === 'logic' && (!attachedFn || sim.ctrl.logicFn !== attachedFn)) attach();
+    if (UI.open) { live(); if (wrap) { const on = c && c.mode === 'logic', r = document.getElementById('lgRun'); if (r && r.classList.contains('on') !== !!on) topUI(); } } }, 120);
+  // start: last graph from this browser, else the one-pill template
+  try { const o = JSON.parse(localStorage.getItem(KEY_CUR) || 'null'); if (o) load(o); else TEMPLATES()['One pill per call (S2 stops it)'](); } catch (e) { TEMPLATES()['One pill per call (S2 stops it)'](); }
+  window.FFLogic = { open, close, attach, compile: () => compile(), exportCpp, exportJS, save, load: o => { load(o); changed(true); }, get graph() { return G; }, TYPES: T, templates: TEMPLATES };
+  const btn = document.getElementById('btnLogic'); if (btn) btn.onclick = open;
+  attach();
+})();
+
 </script>
 </body></html>
