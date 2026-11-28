@@ -114,10 +114,12 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 <div class="row"><label for="sgMu" title="sliding friction between pill and knob (PTFE ~0.1, polished metal / acetal ~0.2, PLA ~0.35, rubber 0.8+)">Friction</label><input type="range" id="sgMu" min="0" max="1.2" step="0.02" value="0.3"><span class="v"><span id="sgMuV">0.3</span></span></div>
 <div class="kv"><b>Knob contacts</b><span id="r_sing">—</span></div>
 <h2>Drive</h2>
+<div class="bkScope note" style="display:none"></div>
 <div class="row"><label for="rpm" title="both cams are tied by the worm; sign flips the belt direction">Cam speed</label><input type="range" id="rpm" min="-60" max="60" step="0.5" value="12"><span class="v"><span id="rpmV"></span> rpm</span></div>
 <div class="row"><label for="camPhase" title="phase offset of the second cam (0 = mirrored, both pinch together)">Cam B phase</label><input type="range" id="camPhase" min="-180" max="180" step="5" value="0"><span class="v"><span id="camPhaseV"></span>°</span></div>
 <label class="note"><input type="checkbox" id="camBump" checked> cam lobes push the belt (real CAD profile)</label>
 <h2>Vibration (speaker)</h2>
+<div class="bkScope note" style="display:none"></div>
 <div class="btns"><button id="vibBtn">🔈 Vibration OFF</button></div>
 <div class="row"><label for="vibF">Frequency</label><input type="range" id="vibF" min="10" max="200" step="1" value="40"><span class="v"><span id="vibFV">40</span> Hz</span></div>
 <div class="row"><label for="vibA" title="peak acceleration the speaker puts into the cartridge, in g (1 g = 9.81 m/s²)">Strength</label><input type="range" id="vibA" min="0.05" max="3" step="0.05" value="0.5"><span class="v"><span id="vibAV">0.5</span> g</span></div>
@@ -145,7 +147,10 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
 <div class="row"><label for="bkPill">Pill</label><select id="bkPill" style="grid-column:2/4"></select></div>
 <div class="row"><label for="bkCount" title="pills in a full load">Pills per load</label><input type="number" id="bkCount" min="1" max="150" style="width:70px"></div>
 <div class="btns"><button id="bkRefill" title="refill this dispenser with a full load">⟳ Refill this dispenser</button></div>
+<div class="row"><label>Software settings</label><small id="bkSoftNote" class="note" style="grid-column:2/4"></small></div>
+<div class="btns"><button id="bkSoftEdit" class="pri" title="make this dispenser the one shown, so Belt speed, Vibrator, Dispense control and the Logic editor show and change its own settings">✎ Set up this dispenser</button><button id="bkSoftCopy" title="copy the shown dispenser's feed rate, vibrator, dispense control and logic to every dispenser in the bank">⧉ Copy its settings to all</button></div>
 <h2>Sensors &amp; feed control</h2>
+<div class="bkScope note" style="display:none"></div>
 <div class="row"><label for="ctMode">Mode</label><select id="ctMode" style="grid-column:2/4"><option value="feed">Dispense on demand (counts pills, stops)</option><option value="continuous">Run nonstop (no counting)</option><option value="logic">Custom logic (node editor)</option></select></div>
 <div class="btns"><button id="btnLogic" title="build your own controller from logic blocks: sensors, conditions, timers, signals and actions">🧩 Logic editor…</button></div>
 <div class="row" style="display:none"><label for="ctN" title="how many pills one press of Dispense delivers">How many pills</label><span style="grid-column:2/4;display:flex;gap:6px;align-items:center"><button id="ctNm" title="one fewer" style="width:34px">−</button><input type="number" id="ctN" min="1" max="1000" value="1" style="width:56px;text-align:center"><button id="ctNp" title="one more" style="width:34px">+</button></span></div>
@@ -3320,7 +3325,19 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function singUI() { const g = S.sing; $('sgOn').checked = !!g.on; $('sgAxis').value = g.axis; for (const [id, k] of [['sgU', 'u_mm'], ['sgX', 'x_mm'], ['sgV', 'v_mm'], ['sgLen', 'len_mm'], ['sgR', 'r_mm'], ['sgMu', 'mu']]) { $(id).value = g[k]; $(id + 'V').textContent = g[k]; } $('dustTack').checked = !!S.dustTack; $('dustStatic').value = S.dustStatic; $('dustStaticV').textContent = S.dustStatic; }
   /* ================================================================ dispenser bank */
   // per dispenser: medication label, pill, load size, and (while idle) a snapshot of the pills still inside it
-  const newUnit = k => { const p = JSON.parse(JSON.stringify(S.pill)); delete p.safety_push_mm; return { med: `Medication ${k + 1}`, pill: p, count: S.count, snap: null, out: 0, dustL: null }; };   // a new dispenser starts on the auto safety-gate throw
+  /* Per-dispenser software settings: what the real machine can change in firmware without touching hardware -- belt feed
+     rate, vibrator (on / frequency / strength / axis drive), the whole dispense controller (mode, timings, ramps, gate
+     servo travel & speed, sensor debounce and counting, backup, safety-gate use) and the custom logic graph. Hardware
+     stays shared by the whole bank: foam, geometry, CAD, sensor placement, drive backlash. */
+  const HW_SENSOR_KEYS = ['zone', 'pos_mm', 'up_mm', 'below_mm', 'side_mm', 'axis', 'beam_mm'], HW_CTRL_KEYS = ['backlash_deg'];
+  const softGet = () => ({ rpm: S.rpm, vib: JSON.parse(JSON.stringify(S.vib || {})), ctrl: JSON.parse(JSON.stringify(ctS())), logic: window.FFLogic ? FFLogic.save() : null });
+  function softApply(sf) { if (!sf) return; const hw = ctS();
+    if (sf.rpm != null) S.rpm = sf.rpm; if (sf.vib) S.vib = Object.assign({}, S.vib, JSON.parse(JSON.stringify(sf.vib)));
+    if (sf.ctrl) { const c = JSON.parse(JSON.stringify(sf.ctrl)); for (const k of HW_CTRL_KEYS) if (hw[k] !== undefined) c[k] = hw[k];
+      if (Array.isArray(c.sensors)) c.sensors.forEach((x, i) => { const h = hw.sensors && hw.sensors[i]; if (h) for (const k of HW_SENSOR_KEYS) { if (h[k] !== undefined) x[k] = h[k]; else delete x[k]; } });
+      if (sim && sim.ctrl) sim.ctrl = null; S.ctrl = c; }
+    if (sf.logic && window.FFLogic) FFLogic.load(JSON.parse(JSON.stringify(sf.logic))); }
+  const newUnit = k => { const p = JSON.parse(JSON.stringify(S.pill)); delete p.safety_push_mm; return { med: `Medication ${k + 1}`, pill: p, count: S.count, snap: null, out: 0, dustL: null, soft: (() => { try { return softGet(); } catch (e) { return null; } })() }; };   // a new dispenser starts on the auto safety-gate throw and a copy of the current software settings   // a new dispenser starts on the auto safety-gate throw
   function pillsLeft(k) { if (k === BANK.cur && sim) { const B = sim.bodies; let n = 0; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) n++; return n; } const u = BANK.units[k]; return u.snap ? u.snap.p.length : u.count; }
   function snapPills(sm) {   // pills still in the dispenser (not yet out): positions + orientation + colour, at rest
     const B = sm.bodies, p = []; for (let i = 0; i < B.n; i++) if (B.alive[i] && B.exitT[i] < 0) p.push([B.px[i], B.py[i], B.pz[i], B.q[i * 4], B.q[i * 4 + 1], B.q[i * 4 + 2], B.q[i * 4 + 3], B.hue[i]]); return { p }; }
@@ -3336,9 +3353,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     if (k === BANK.cur || k < 0 || k >= BANK.n) return;
     dustLedgerTick();
     const old = BANK.units[BANK.cur], o0 = bankOff(BANK.cur), o1 = bankOff(k);
-    old.snap = snapPills(sim); old.pill = JSON.parse(JSON.stringify(S.pill)); old.count = S.count; old.out += sim.stats.delivered || 0;
+    old.snap = snapPills(sim); old.pill = JSON.parse(JSON.stringify(S.pill)); old.count = S.count; old.out += sim.stats.delivered || 0; old.soft = softGet();
     const down = takeDownstream(sim, o0), wear = { p: sim.cells.perm.map(a => a.slice()), v: sim.cells.vis.map(a => a.slice()) };
-    BANK.cur = k; const u = BANK.units[k]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count;
+    BANK.cur = k; const u = BANK.units[k]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; if (u.soft) softApply(u.soft); else u.soft = softGet();
     for (let a = 0; a < 3; a++) cam.t[a] += o1[a] - o0[a];   // camera follows the dispenser that is now running
     for (const p of XP) p.grid = null;
     newSim(); applyFoam(); sim.cells.perm.forEach((a, i) => a.set(wear.p[i])); sim.cells.vis.forEach((a, i) => a.set(wear.v[i]));
@@ -3361,9 +3378,9 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
   function setBankN(n) { n = Math.max(1, Math.min(32, Math.round(n) || 1));
     while (BANK.units.length < n) BANK.units.push(newUnit(BANK.units.length));
     if (BANK.cur >= n) activate(0); BANK.n = n; BANK.q = BANK.q.filter(c => c.k < n); S.bank = bankSave(); bankUI(); fitAll(); }
-  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, BANK.n).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, out: u.out, dustL: u.dustL || null, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap })) }; }
+  function bankSave() { return { n: BANK.n, cols: BANK.cols, pitchX: BANK.pitchX, pitchY: BANK.pitchY, cur: BANK.cur, units: BANK.units.slice(0, 32).map((u, k) => ({ med: u.med, pill: k === BANK.cur ? S.pill : u.pill, count: k === BANK.cur ? S.count : u.count, out: u.out, dustL: u.dustL || null, snap: k === BANK.cur ? (sim ? snapPills(sim) : null) : u.snap, soft: k === BANK.cur ? softGet() : (u.soft || null) })) }; }   // every dispenser ever set up (all 32), so shrinking the bank and growing it back loses nothing
   function bankLoad(b) { if (!b) return; BANK.cols = b.cols || 8; BANK.pitchX = b.pitchX || 50; BANK.pitchY = b.pitchY || 110; BANK.units = (b.units || []).map((u, k) => Object.assign(newUnit(k), u)); BANK.n = Math.max(1, Math.min(32, b.n || BANK.units.length || 1)); while (BANK.units.length < BANK.n) BANK.units.push(newUnit(BANK.units.length));
-    BANK.cur = Math.min(b.cur || 0, BANK.n - 1); const u = BANK.units[BANK.cur]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; }
+    BANK.cur = Math.min(b.cur || 0, BANK.n - 1); const u = BANK.units[BANK.cur]; S.pill = JSON.parse(JSON.stringify(u.pill)); S.count = u.count; if (u.soft) { softApply(u.soft); if (window.FFLogic) setTimeout(() => FFLogic.load(JSON.parse(JSON.stringify(u.soft.logic || FFLogic.save()))), 0); } }
   const pillLabel = p => { const sh = { tablet: 'tablet', capsule: 'capsule', ellipsoid: 'softgel', sphere: 'bead' }[p.shape] || p.shape; return p.shape === 'tablet' || p.shape === 'sphere' ? `${sh} ${p.W} mm` : `${sh} ${p.L}×${p.W} mm`; };
   let bankSel = 0;
   function bankLabels() { const ds = $('dkUnit'); for (const o of ds.options) { const k = +o.value; o.textContent = `#${k + 1} · ${BANK.units[k].med} · ${pillLabel(k === BANK.cur ? S.pill : BANK.units[k].pill)} · ${pillsLeft(k)} left${k === BANK.cur ? ' ◀ running' : ''}`; }
@@ -3381,7 +3398,14 @@ aside.r .stepH{color:#9cc3ff;border-color:#2a3446}
     for (const tr of $('bkTbl').querySelectorAll('tr[data-k]')) { const k = +tr.dataset.k; tr.onclick = e => { if (e.target.classList.contains('bkGo')) return; bankSel = k; bankEd(); bankUI(); }; tr.querySelector('.bkGo').onclick = () => { bankCall(k, ctS().n); $('dkUnit').value = String(k); }; }
     bankEd();
   }
-  function bankEd() { if (bankSel >= BANK.n) bankSel = 0; const u = BANK.units[bankSel]; $('bkSelN').textContent = `#${bankSel + 1}`; $('bkMed').value = u.med; $('bkCount').value = bankSel === BANK.cur ? S.count : u.count; $('bkPill').value = ''; }
+  $('bkSoftEdit').onclick = () => { if (bankSel !== BANK.cur) activate(bankSel); else bankUI(); };
+  $('bkSoftCopy').onclick = () => { if (BANK.n < 2) return; if (!confirm(`Copy dispenser #${BANK.cur + 1}'s feed rate, vibrator, dispense control and logic to all ${BANK.n} dispensers? Their own settings are replaced.`)) return;
+    const sf = softGet(); for (let k = 0; k < BANK.n; k++) if (k !== BANK.cur) BANK.units[k].soft = JSON.parse(JSON.stringify(sf)); S.bank = bankSave(); bankUI(); };
+  function bankEd() { if (bankSel >= BANK.n) bankSel = 0; const u = BANK.units[bankSel];
+    { const multi = BANK.n > 1, lab = `#${BANK.cur + 1} · ${BANK.units[BANK.cur].med}`;
+      for (const e of document.querySelectorAll('.bkScope')) { e.style.display = multi ? '' : 'none'; e.innerHTML = `Settings for dispenser <b>${lab.replace(/</g, '&lt;')}</b> only (each dispenser keeps its own).`; }
+      $('bkSoftNote').innerHTML = bankSel === BANK.cur ? `Belt speed, vibrator, dispense control and logic now shown are <b>#${BANK.cur + 1}</b>'s.` : `#${bankSel + 1} has its own feed rate, vibrator, dispense control and logic. Press <b>Set up this dispenser</b> to edit them.`;
+      $('bkSoftEdit').disabled = bankSel === BANK.cur; $('bkSoftCopy').style.display = multi ? '' : 'none'; } $('bkSelN').textContent = `#${bankSel + 1}`; $('bkMed').value = u.med; $('bkCount').value = bankSel === BANK.cur ? S.count : u.count; $('bkPill').value = ''; }
   $('bkN').onchange = () => setBankN(+$('bkN').value);
   for (const [id, k] of [['bkCols', 'cols'], ['bkPx', 'pitchX'], ['bkPy', 'pitchY']]) $(id).onchange = () => { BANK[k] = Math.max(id === 'bkCols' ? 1 : 10, +$(id).value || BANK[k]); fitAll(); };
   $('bkMed').onchange = () => { BANK.units[bankSel].med = $('bkMed').value || `Medication ${bankSel + 1}`; bankUI(); };
